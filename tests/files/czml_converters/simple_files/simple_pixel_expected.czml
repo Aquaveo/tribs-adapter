@@ -1,0 +1,62 @@
+[
+    {
+        "id": "document",
+        "name": "Pixel Files",
+        "version": "1.0"
+    },
+    {
+        "id": "point_1 [test_dataset1234]",
+        "position": {
+            "cartographicDegrees": [
+                75.0,
+                75.0,
+                20
+            ],
+            "epoch": "2020-01-01T00:00:00Z"
+        },
+        "point": {
+            "color": [
+                {
+                    "interval": "2020-01-01T00:00:00Z/2020-01-01T03:00:00Z",
+                    "rgba": [
+                        255,
+                        255,
+                        255,
+                        255
+                    ]
+                },
+                {
+                    "interval": "2020-01-01T03:00:00Z/2020-01-01T06:00:00Z",
+                    "rgba": [
+                        127,
+                        127,
+                        255,
+                        255
+                    ]
+                },
+                {
+                    "interval": "2020-01-01T06:00:00Z/2020-01-01T09:00:00Z",
+                    "rgba": [
+                        0,
+                        0,
+                        255,
+                        255
+                    ]
+                }
+            ],
+            "outlineColor": {
+                "rgba": [
+                    0,
+                    0,
+                    0,
+                    255
+                ]
+            },
+            "outlineWidth": 1,
+            "pixelSize": 10,
+            "show": true,
+            "heightReference": "RELATIVE_TO_GROUND"
+        },
+        "availability": "2020-01-01T00:00:00Z/2020-01-01T01:00:00Z"
+    }
+]

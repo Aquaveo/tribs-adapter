@@ -1,0 +1,7 @@
+{
+    "name": "Salas Hydromet Stations",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "tribs_hydromet_stations"
+    }
+}

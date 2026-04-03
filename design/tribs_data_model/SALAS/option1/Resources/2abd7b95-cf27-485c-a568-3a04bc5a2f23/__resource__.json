@@ -1,0 +1,7 @@
+{
+    "name": "Salas Soil Table",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "tribs_soil_table"
+    }
+}

@@ -1,0 +1,7 @@
+{
+    "name": "Salas Rain Gauge Stations",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "tribs_rain_gauge_stations"
+    }
+}

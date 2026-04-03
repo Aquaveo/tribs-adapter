@@ -1,0 +1,92 @@
+{
+    "fileName": "salas.in",
+    "modelRunParameters": {
+        "timeVariables": {
+            "STARTDATE": "06/01/2004/00",
+            "RUNTIME": 700,
+            "TIMESTEP": 3.75,
+            "GWSTEP": 7.5,
+            "METSTEP": 60.0,
+            "ETISTEP": 60.0,
+            "RAININTRVL": 1,
+            "OPINTRVL": 1,
+            "SPOPINTRVL": 10,
+            "INTSTORMMAX": 8760,
+            "RAINSEARCH": 2400
+        },
+        "routingVariables": {
+            "BASEFLOW": 0.01,
+            "VELOCITYCOEF": 0.5,
+            "VELOCITYRATIO": 5,
+            "KINEMVELCOEF": 0.01,
+            "FLOWEXP": 0.0000001,
+            "CHANNELROUGHNESS": 0.15,
+            "CHANNELWIDTH": 10,
+            "CHANNELWIDTHCOEFF": 1.0,
+            "CHANNELWIDTHEXPNT": 0.3
+        }
+    },
+    "modelRunOptions": {
+        "OPTMESHINPUT": 2,
+        "RAINSOURCE": 2,
+        "OPTEVAPOTRANS": 1,
+        "OPTINTERCEPT": 2,
+        "GFLUXOPTION": 2,
+        "METDATAOPTION": 1,
+        "CONVERTDATA": 0,
+        "OPTBEDROCK": 0,
+        "WIDTHINTERPOLATION": 0,
+        "OPTGWFILE": 0,
+        "OPTRUNON": 0
+    },
+    "modelInputFilesAndPathnames": {
+        "meshGeneration": {
+            "INPUTDATAFILE": "b5fbf7f8-bff5-4d3f-adec-7721854aa813:7254e912-7f6a-412b-9f44-f2906f9536a0:salas",
+            "POINTFILENAME": "b5fbf7f8-bff5-4d3f-adec-7721854aa813:7254e912-7f6a-412b-9f44-f2906f9536a0:salas.points"
+        },
+        "resamplingGrids": {
+            "SOILTABLENAME": "2abd7b95-cf27-485c-a568-3a04bc5a2f23:26e77327-cc83-41f7-8bfb-98fe609bbd09:salas.sdt",
+            "SOILMAPNAME": "5b2c674c-11bd-40ba-ac48-96b46d145003:8b504df2-281f-407b-ac9e-db225f6b3d4f:salas.soi",
+            "LANDTABLENAME": "4168e694-5f55-4b35-9d9e-7d82b3fede07:e4f8494b-086c-41f2-9ea8-ca1685ab06bb:salas.ldt",
+            "LANDMAPNAME": "9721c551-cdac-44fc-8964-8b09627eafad:a1f06946-1e98-4462-94a8-ae5af735cf6d:salas.lan",
+            "GWATERFILE": "31689c77-e222-4b96-96a6-8aa9a96a27fb:2eaf95fb-3334-47a8-9748-2126484e9f7c:salas.iwt",
+            "RAINFILE": "c16429ab-c561-4961-8e43-a245f20f6f86:5eacb619-2caf-46a6-be95-a27f5e878a60:p",
+            "RAINEXTENSION": "txt",
+            "DEPTHTOBEDROCK": 5,
+            "BEDROCKFILE": "ed0d5767-5148-4269-8adb-bd9b417d5c01:d42476e8-6a51-4010-8329-e14a29338b00:salas.brd"
+        },
+        "meteorologicalData": {
+            "HYDROMETSTATIONS": "1e40a35b-9908-49bf-b9a6-5cf469a7fa9e:882226c1-8975-4c8f-8fc4-0fad36275864:weatherC1601_2004.sdf",
+            "HYDROMETGRID": "Weather/", 
+            "HYDROMETCONVERT": "Weather/",
+            "HYDROMETBASENAME": "Weather/weatherField",
+            "GAUGESTATIONS": "7a283cc5-3644-4f1b-907d-5b000681e6a9:d8d6ed7d-84c6-4a8e-8007-b1468d6749db:rainGauge.sdf"
+        },
+        "outputData": {
+            "OUTFILENAME": "voronoi/salas",
+            "OUTHYDROFILENAME": "hyd/salas",
+            "OUTHYDROEXTENSION": "mrf",
+            "RIBSHYDOUTPUT": 0,
+            "NODEOUTPUTLIST": "83cc5ebf-91ef-4cdf-95ba-9954c290daff:d9fa7eaa-08c9-4e97-92f6-12e8b9877bdd:pNodes.dat",
+            "HYDRONODELIST": "208e2489-7455-432e-b929-4ecdcdb9b114:b7bd66c6-2517-4a21-90ee-2c0428f2ece4:hNodes.dat",
+            "OUTLETNODELIST": "10383a86-f327-4aed-8b13-20c1b98105b6:35963f8b-98a7-4dfd-8df0-859378dc856d:oNodes.dat"
+        }
+    },
+    "modelModes": {
+        "rainfallForecasting": {
+            "FORECASTMODE": 0,
+            "RAINDISTRIBUTION": 0
+        },
+        "stochasticClimateForcing": {
+            "STOCHASTICMODE": 0,
+            "PMEAN": 0.0,
+            "STDUR": 0.0,
+            "ISTDUR": 0.0,
+            "SEED": 11,
+            "PERIOD": 0,
+            "MAXPMEAN": 0,
+            "MAXSTDURMN": 0,
+            "MAXISTDURMN": 0        
+        }
+    }
+}

@@ -1,0 +1,7 @@
+{
+    "name": "Salas TIN",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "tribs_tin"
+    }
+}

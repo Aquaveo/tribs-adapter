@@ -1,0 +1,7 @@
+{
+    "name": "Salas Outlet Node List",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "tribs_node_list"
+    }
+}

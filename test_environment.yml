@@ -1,0 +1,31 @@
+name: test
+
+channels:
+- conda-forge
+
+dependencies:
+- python=3.10
+- cxx-compiler
+- git
+- gdal=3.4
+- psycopg2
+# ATCORE dependencies
+- django=4.2
+- django-select2
+- django-taggit<5
+- coverage
+- factory_boy
+- filelock
+- geojson
+- jinja2
+- pandas
+- param
+- pyshp
+- requests
+- sqlalchemy<2
+- tethys_dataset_services>=2.4.1
+- panel
+# TETHYS dependencies
+- plotly
+- pip:
+  - django-datetime-widget2

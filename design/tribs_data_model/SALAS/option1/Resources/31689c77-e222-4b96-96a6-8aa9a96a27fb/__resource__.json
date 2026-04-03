@@ -1,0 +1,7 @@
+{
+    "name": "Salas Initial Groundwater Map",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "ascii_raster"
+    }
+}

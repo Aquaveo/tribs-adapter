@@ -1,0 +1,110 @@
+{
+    "fileName": "smallbasin.in",
+    "modelRunParameters": {
+        "timeVariables": {
+            "STARTDATE": "9/24/1996/00/00",
+            "RUNTIME": 1800,
+            "TIMESTEP": 3.75,
+            "GWSTEP": 30.0,
+            "METSTEP": 60.0,
+            "ETISTEP": null,
+            "RAININTRVL": 1.0,
+            "OPINTRVL": 1.0,
+            "SPOPINTRVL": 180,
+            "INTSTORMMAX": 120,
+            "RAINSEARCH": 24
+        },
+        "routingVariables": {
+            "BASEFLOW": 0.5,
+            "VELOCITYCOEF": 0.6,
+            "KINEMVELCOEF": 25,
+            "VELOCITYRATIO": 70,
+            "FLOWEXP": 0.4,
+            "CHANNELROUGHNESS": 0.3,
+            "CHANNELWIDTH": 10,
+            "CHANNELWIDTHCOEFF": 2.3,
+            "CHANNELWIDTHEXPNT": 0.5
+        }
+    },
+    "modelRunOptions": {
+        "OPTMESHINPUT": 8,
+        "RAINSOURCE": 1,
+        "OPTEVAPOTRANS": 1,
+        "OPTSNOW": 0,
+        "HILLALBOPT": 0,
+        "OPTRADSHELT": 0,
+        "OPTINTERCEPT": 2,
+        "OPTLANDUSE": 0,
+        "GFLUXOPTION": 2,
+        "METDATAOPTION": 1,
+        "CONVERTDATA": 0,
+        "OPTBEDROCK": 0,
+        "WIDTHINTERPOLATION": 0,
+        "OPTGWFILE": 0,
+        "OPTRUNON": 1,
+        "OPTRESERVOIR": 0,
+        "OPTSOILTYPE": 0
+    },
+    "modelInputFilesAndPathnames": {
+        "meshGeneration": {
+            "INPUTDATAFILE": "<resource_id>:<file_collection>:voronoi/smallbasin",
+            "INPUTTIME": 0,
+            "ARCINFOFILENAME": "<resource_id>:<file_collection>:smallbasin",
+            "POINTFILENAME": "<resource_id>:<file_collection>:small.points"
+        },
+        "resamplingGrids": {
+            "SOILTABLENAME": "<resource_id>:<file_collection>:small.sdt",
+            "SOILMAPNAME": "<resource_id>:<file_collection>:small.soi",
+            "LANDTABLENAME": "<resource_id>:<file_collection>:small.ldt",
+            "LANDMAPNAME": "<resource_id>:<file_collection>:small.lan",
+            "GWATERFILE": "<resource_id>:<file_collection>:smallgw.iwt",
+            "RAINFILE": "<resource_id>:<file_collection>:p",
+            "RAINEXTENSION": "txt",
+            "DEPTHTOBEDROCK": 10,
+            "BEDROCKFILE": "<resource_id>:<file_collection>:"
+        },
+        "meteorologicalVariables": {
+            "TLINKE": 2.0,
+            "MINSNTEMP": -27.0,
+            "TEMPLAPSE": -0.0065,
+            "PRECLAPSE": 0,
+            "SNLIQFRAC": 0
+        },
+        "meteorologicalData": {
+            "HYDROMETSTATIONS": "<resource_id>:<file_collection>:bfFall1996_dmp.sdf",
+            "HYDROMETBASENAME": "<resource_id>:<file_collection>:bfFall1996_dmp.mdf"
+        },
+        "outputData": {
+            "OUTFILENAME": "voronoi/smallbasin",
+            "OUTHYDROFILENAME": "hyd/smallbasin",
+            "OUTHYDROEXTENSION": "mrf",
+            "RIBSHYDOUTPUT": 0,
+            "NODEOUTPUTLIST": "<resource_id>:<file_collection>:pNodes.dat",
+            "HYDRONODELIST": "<resource_id>:<file_collection>:hNodes.dat",
+            "OUTLETNODELIST": "<resource_id>:<file_collection>:oNodes.dat"
+        }
+    },
+    "modelModes": {
+        "rainfallForecasting": {
+            "FORECASTMODE": 0,
+            "RAINDISTRIBUTION": 0
+        },
+        "stochasticClimateForcing": {
+            "STOCHASTICMODE": 0,
+            "PMEAN": 0,
+            "STDUR": 0,
+            "ISTDUR": 0,
+            "SEED": 0.5
+        }
+    },
+    "restartModeOptions": {
+        "RESTARTMODE": 0
+    },
+    "parallelModeOptions": {
+        "PARALLELMODE": 1,
+        "GRAPHOPTION": 0
+    },
+    "visualizationOptions": {
+        "OPTVIZ": 0
+    }
+}

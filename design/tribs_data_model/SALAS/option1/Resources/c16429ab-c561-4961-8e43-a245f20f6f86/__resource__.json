@@ -1,0 +1,7 @@
+{
+    "name": "Salas Rainfall Maps",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "ascii_raster_timeseries"
+    }
+}

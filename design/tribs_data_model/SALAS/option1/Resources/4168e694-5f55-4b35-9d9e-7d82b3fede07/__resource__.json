@@ -1,0 +1,7 @@
+{
+    "name": "Salas Landuse Table",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "tribs_land_table"
+    }
+}

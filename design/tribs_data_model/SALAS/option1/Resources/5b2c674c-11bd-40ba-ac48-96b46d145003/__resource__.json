@@ -1,0 +1,7 @@
+{
+    "name": "Salas Soil Map",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "ascii_raster"
+    }
+}

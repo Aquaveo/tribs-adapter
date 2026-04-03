@@ -1,0 +1,96 @@
+[project]
+name = "tribs-adapter"
+dynamic = ["version"]
+description = "Adapts tRIBS hydrolgic modeling data and workflows for Python applications."
+authors = [{ name = "Nathan Swain", email = "nswain@aquaveo.com" }]
+dependencies = [
+    "pydantic>=2.7.0",
+    "jinja2>=3.1.2",
+    "sqlalchemy<2",
+    "geoalchemy2>=0.14.1",
+    "pandas>=2.2.2",
+    "psycopg2>=2.9.7",
+    "pygltflib>=1.16.0",
+    "pyproj>=3.6.1",
+    "StrEnum>=0.4.15",
+    "pyproj>=3.6.1",
+    "pytRIBS @ git+https://github.com/tribshms/pytRIBS.git@main",
+    "pytz>=2023.3",
+    "xarray>=2023.1.0",
+    "rasterio==1.3.10",
+    "geoserver-restconfig==2.0.9",
+    "shapely>=2",
+    "matplotlib>=3.9.0",
+    "pyvista>=0.43.9",
+    "numpy<2",
+    "timezonefinder>=6.5.2",
+    "rioxarray>=0.15.7",
+    "netCDF4>=1.7.1.post1",
+    "whitebox>=2.3.5",
+    "django==4.2",
+    "pillow>=11.0.0",
+    "tethys-dataset-services>=2.4.1",
+]
+requires-python = ">=3.10,<3.11"
+readme = "README.md"
+license = { text = "MIT" }
+
+[project.scripts]
+tribs-adapter = "tribs_adapter.cli:tribs_adapter_command"
+
+[tool.pdm]
+
+[tool.pdm.resolution.overrides]
+earthaccess = ">=0.14.0,<0.15.0"
+
+[tool.pdm.dev-dependencies]
+test = [
+    "django==4.2",
+    "param>=1.13.0",
+    "pytest>=7.3.0",
+    "pytest-cov>=4.0.0",
+    "pytest-sugar>=0.9.7",
+    "pytest-unordered>=0.5.2",
+    "pytest-mock>=3.14.0",
+    "coverage>=7.6.1",
+    "typing-extensions>=4.12",
+]
+lint = ["flake8>=5.0.4", "yapf>=0.32.0", "toml>=0.10.2"]
+
+[tool.pdm.scripts]
+test = "pytest"
+format = "yapf --in-place --recursive --verbose ."
+lint = "flake8 --config .flake8 tribs_adapter tests"
+all = { composite = ["format", "lint", "test"] }
+
+[tool.pdm.version]
+source = "scm"
+
+[tool.pytest.ini_options]
+addopts = "--cov"
+testpaths = ["tests"]
+filterwarnings = [
+    'ignore:Deprecated call to `pkg_resources.declare_namespace:DeprecationWarning',
+    'ignore:pkg_resources is deprecated as an API.:DeprecationWarning',
+    'ignore::sqlalchemy.exc.MovedIn20Warning',
+]
+
+[tool.coverage.paths]
+source = ["tribs_adapter"]
+
+[tool.coverage.run]
+source = ["tribs_adapter"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.yapf]
+based_on_style = "facebook"
+column_limit = 120
+coalesce_brackets = true
+dedent_closing_brackets = true
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"

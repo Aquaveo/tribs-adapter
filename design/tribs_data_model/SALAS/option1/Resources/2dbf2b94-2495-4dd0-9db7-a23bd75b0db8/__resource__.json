@@ -1,0 +1,7 @@
+{
+    "name": "Salas Hydromet Timeseries",
+    "type": "dataset",
+    "attributes": {
+        "dataset_type": "tsv"
+    }
+}
