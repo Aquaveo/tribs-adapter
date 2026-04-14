@@ -19,7 +19,7 @@ def preprocess_parallel_partition_dataset_job_callback(condor_workflow):
     step = resource_workflow.get_step_by_name("Select a Parallel Partitioning Dataset")
     dataset = step.get_parameter('form-values')['parallel_partitioning_dataset']
     dataset_name, dataset_id = dataset.split(':')
-    dataset_name = dataset_name.replace(' ', '_')
+    dataset_name = safe_str(dataset_name)
 
     job_name = 'preprocess_parallel_partitioning_dataset'
     executable = f'{job_name}.py'
@@ -118,8 +118,8 @@ def build_jobs_callback(condor_workflow):
     for idx, point in enumerate(points_geometry.get('features', [])):
         # Set up the job for the generic job
         executable = 'run_generic_job.py'
-        point_name = point.get('properties', {}).get('point_name', f'point_{idx + 1}')
-        job_name = f'run_{safe_str(point_name)}'
+        point_name = safe_str(point.get('properties', {}).get('point_name', f'point_{idx + 1}'))
+        job_name = f'run_{point_name}'
         output_filename = f'{job_name}_out.json'
 
         job = {

@@ -27,7 +27,29 @@ def get_gmt_offset(lat, long):
 
 
 def safe_str(s):
-    s_safe = "".join([c for c in s if c.isalpha() or c.isdigit() or c == ' ']).rstrip()
+    """Sanitize a string for use in file names and HTCondor job arguments.
+
+    Strips leading/trailing whitespace, removes characters that are not
+    alphanumeric, spaces, or underscores, and replaces internal spaces
+    with underscores.
+
+    Args:
+        s (str): The input string to sanitize.
+
+    Returns:
+        str: The sanitized string.
+
+    Examples:
+        >>> safe_str('abc 123')
+        'abc_123'
+        >>> safe_str('abc_123')
+        'abc_123'
+        >>> safe_str('abc!@#123')
+        'abc123'
+        >>> safe_str('  abc 123  ')
+        'abc_123'
+    """
+    s_safe = "".join([c for c in s if c.isalpha() or c.isdigit() or c in [' ', '_']]).strip()
     s_safe = s_safe.replace(' ', '_')
     return s_safe
 
