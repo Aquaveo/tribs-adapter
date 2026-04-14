@@ -38,6 +38,12 @@ license = { text = "MIT" }
 [project.scripts]
 tribs-adapter = "tribs_adapter.cli:tribs_adapter_command"
 
+[project.entry-points."tribs.workflows"]
+bulk_data_retrieval = "tribs_adapter.workflows.bulk_data_retrieval:BulkDataRetrievalWorkflow"
+prepare_met = "tribs_adapter.workflows.prepare_met_forcings:PrepareMetWorkflow"
+prepare_soils = "tribs_adapter.workflows.prepare_soil_parameters:PrepareSoilsWorkflow"
+run_simulation = "tribs_adapter.workflows.run_simulation:RunSimulationWorkflow"
+
 [tool.pdm]
 
 [tool.pdm.resolution.overrides]

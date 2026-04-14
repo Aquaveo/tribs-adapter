@@ -1,7 +1,6 @@
 from tribs_adapter.app_users import TribsRoles
 from tethysext.atcore.models.resource_workflow_steps import SpatialCondorJobRWS, FormInputRWS, TableInputRWS
 from tribs_adapter.workflows.prepare_soil_parameters.read_write_soil_file import read_soil_data_to_df
-
 from ..tribs_workflow import TribsWorkflow
 from .jobs import build_rosetta3_jobs_callback, build_generate_tribs_files_callback
 

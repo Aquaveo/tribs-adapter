@@ -3,7 +3,6 @@ from tethysext.atcore.models.resource_workflow_steps import FormInputRWS, Spatia
 
 from ..tribs_workflow import TribsWorkflow
 from .jobs import build_run_jobs_callback, preprocess_parallel_partition_dataset_job_callback
-# from .attributes import PointAttributes
 
 
 class RunSimulationWorkflow(TribsWorkflow):
