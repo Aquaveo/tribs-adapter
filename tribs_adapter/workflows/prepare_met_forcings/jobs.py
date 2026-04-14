@@ -30,8 +30,8 @@ def build_jobs_callback(condor_workflow):
     for idx, point in enumerate(points_geometry.get('features', [])):
         # Set up the job for the generic job
         executable = 'run_generic_job.py'
-        point_name = point.get('properties', {}).get('point_name', f'point_{idx + 1}')
-        job_name = f'run_{safe_str(point_name)}'
+        point_name = safe_str(point.get('properties', {}).get('point_name', f'point_{idx + 1}'))
+        job_name = f'run_{point_name}'
         output_filename = f'{job_name}_out.json'
 
         job = {

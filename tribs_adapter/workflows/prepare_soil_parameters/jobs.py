@@ -21,7 +21,7 @@ def build_rosetta3_jobs_callback(condor_workflow):
     select_datasets_step = resource_workflow.get_step_by_name('Select Soil Dataset(s)')
     form_values = select_datasets_step.get_parameter('form-values')
     selected_dataset = form_values.get('raster_datasets', [])
-    output_name = form_values.get('output_name').replace(' ', '_')
+    output_name = safe_str(form_values.get('output_name'))
 
     # Create one job per dataset
     for _, dataset in enumerate(selected_dataset):
@@ -67,7 +67,7 @@ def build_generate_tribs_files_callback(condor_workflow):
     select_datasets_step = resource_workflow.get_step_by_name('Select Soil Dataset(s)')
     form_values = select_datasets_step.get_parameter('form-values')
     selected_datasets = form_values.get('raster_datasets', [])
-    output_name = form_values.get('output_name').replace(' ', '_')
+    output_name = safe_str(form_values.get('output_name'))
 
     # Create one job per dataset
     for _, dataset in enumerate(selected_datasets):
@@ -121,8 +121,8 @@ def build_jobs_callback(condor_workflow):
     for idx, point in enumerate(points_geometry.get('features', [])):
         # Set up the job for the generic job
         executable = 'run_generic_job.py'
-        point_name = point.get('properties', {}).get('point_name', f'point_{idx + 1}')
-        job_name = f'run_{safe_str(point_name)}'
+        point_name = safe_str(point.get('properties', {}).get('point_name', f'point_{idx + 1}'))
+        job_name = f'run_{point_name}'
         output_filename = f'{job_name}_out.json'
 
         job = {

@@ -19,7 +19,9 @@ def test_get_gmt_ofset():
 def test_safe_str():
     assert safe_str('abc123') == 'abc123'
     assert safe_str('abc 123') == 'abc_123'
+    assert safe_str('abc_123') == 'abc_123'
     assert safe_str('abc!@#123') == 'abc123'
+    assert safe_str('  abc 123  ') == 'abc_123'
 
 
 def test_get_condor_fdb_root():

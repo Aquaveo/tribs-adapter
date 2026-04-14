@@ -26,10 +26,8 @@ def build_jobs_callback(condor_workflow):
 
         # Set up the job for the generic job
         executable = "run_bulk_soil_data_retrieval.py"
-        polygon_name = polygon.get("properties", {}).get("polygon_name", f"polygon_{idx + 1}")
-        job_name = f"run_bulk_soil_data_retrieval_{safe_str(polygon_name)}"
-
-        arguments = [polygon_name, idx]
+        polygon_name = safe_str(polygon.get("properties", {}).get("polygon_name", f"polygon_{idx + 1}"))
+        job_name = f"run_bulk_soil_data_retrieval_{polygon_name}"
 
         job = {
             "name": job_name,
@@ -38,7 +36,7 @@ def build_jobs_callback(condor_workflow):
             "remote_input_files": [str(JOB_EXECUTABLES_DIR / executable), ],
             "attributes": {
                 "executable": executable,
-                "arguments": arguments,
+                "arguments": [polygon_name, idx],
                 "transfer_input_files": [f"../{executable}", ],
                 "transfer_output_files": [],
                 "environment": condor_env,
