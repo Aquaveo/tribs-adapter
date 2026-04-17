@@ -2,10 +2,10 @@
 # It is not intended for manual editing.
 
 [metadata]
-groups = ["default", "gdal", "lint", "test"]
+groups = ["default", "lint", "test"]
 strategy = []
 lock_version = "4.5.0"
-content_hash = "sha256:e52a45d1ff5ea5999e3921e75c57264fdaed78e9b439d5142bbc264debb0e6c7"
+content_hash = "sha256:a6047815b3192ecbdfb4aa41f93982df2eb79e700d7594c19ccf443df16b2201"
 
 [[metadata.targets]]
 requires_python = ">=3.10,<3.11"
