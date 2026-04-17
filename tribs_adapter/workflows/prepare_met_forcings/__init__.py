@@ -4,9 +4,8 @@ from pathlib import Path
 
 from tribs_adapter.app_users import TribsRoles
 from tethysext.atcore.models.resource_workflow_steps import FormInputRWS, SpatialCondorJobRWS, SpatialInputRWS
-
-from ..utilities import get_condor_env
 from ..tribs_workflow import TribsWorkflow
+from ..utilities import get_condor_env
 from .jobs import REQUEST_CPUS_PER_JOB
 
 

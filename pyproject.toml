@@ -13,7 +13,6 @@ dependencies = [
     "pygltflib>=1.16.0",
     "pyproj>=3.6.1",
     "StrEnum>=0.4.15",
-    "pyproj>=3.6.1",
     "pytRIBS @ git+https://github.com/tribshms/pytRIBS.git@main",
     "pytz>=2023.3",
     "xarray>=2023.1.0",
@@ -37,6 +36,12 @@ license = { text = "MIT" }
 
 [project.scripts]
 tribs-adapter = "tribs_adapter.cli:tribs_adapter_command"
+
+[project.entry-points."tribs.workflows"]
+bulk_data_retrieval = "tribs_adapter.workflows.bulk_data_retrieval:BulkDataRetrievalWorkflow"
+prepare_met = "tribs_adapter.workflows.prepare_met_forcings:PrepareMetWorkflow"
+prepare_soils = "tribs_adapter.workflows.prepare_soil_parameters:PrepareSoilsWorkflow"
+run_simulation = "tribs_adapter.workflows.run_simulation:RunSimulationWorkflow"
 
 [tool.pdm]
 
