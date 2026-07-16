@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 import subprocess
+import sys
 
 import osgeo
 from pyproj import datadir
@@ -69,7 +70,7 @@ def get_condor_proj_dir(debug=False):
 
     # If in debug mode, use the local proj lib as fallback, otherwise use the container proj as fallback
     if debug:
-        fallback = datadir.get_data_dir()
+        fallback = os.path.join(sys.prefix, 'share', 'proj')
     else:
         fallback = CONTAINER_PROJ_DIR
 

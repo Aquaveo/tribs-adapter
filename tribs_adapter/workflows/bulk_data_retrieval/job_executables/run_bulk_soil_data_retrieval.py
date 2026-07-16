@@ -35,23 +35,10 @@ def reproject_point(x, y, out_srid, in_srid=4326):
     Returns:
         tuple<float, float>: reprojected coordinates (i.e.: x coordinate / longitude, y coordinate / latitude).
     """
-    source = osr.SpatialReference()
-    source.ImportFromEPSG(in_srid)
 
-    target = osr.SpatialReference()
-    if isinstance(out_srid, str):
-        out_srid = int(out_srid)
-    target.ImportFromEPSG(out_srid)
-
-    order_option = gdal.GetConfigOption("OGR_CT_FORCE_TRADITIONAL_GIS_ORDER")
-    gdal.SetConfigOption("OGR_CT_FORCE_TRADITIONAL_GIS_ORDER", "YES")
-    point = ogr.Geometry(ogr.wkbPoint)
-    point.AddPoint(x, y)
-    point.AssignSpatialReference(source)
-    point.TransformTo(target)
-    gdal.SetConfigOption("OGR_CT_FORCE_TRADITIONAL_GIS_ORDER", order_option)
-
-    return point.GetX(), point.GetY()
+    from pyproj import Transformer
+    transformer = Transformer.from_crs(in_srid, out_srid, always_xy=True)  # always_xy = lon/lat order
+    return transformer.transform(x, y)
 
 
 @workflow_step_job
