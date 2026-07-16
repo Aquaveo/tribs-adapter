@@ -93,10 +93,11 @@ class Project(Resource):
     @property
     def fdb_root_directory(self) -> Path:
         """Get the root directory for the FileDatabase for this Project."""
-        fdb_root_directory = Path(os.environ.get('FDB_ROOT_DIR'))
-        log.debug(f'FDB_ROOT_DIR: {fdb_root_directory}')
-        if not fdb_root_directory:
-            raise RuntimeError('Coud not determine the file database root directory for project. Is FDB_ROOT_DIR set?')
+        root = os.environ.get('FDB_ROOT_DIR')
+        log.debug(f'FDB_ROOT_DIR: {root}')
+        if not root:
+            raise RuntimeError('Could not determine the file database root directory for project. Is FDB_ROOT_DIR set?')
+        fdb_root_directory = Path(root)
         if not fdb_root_directory.exists():
             raise RuntimeError(f'File database root directory does not exist: {fdb_root_directory}')
         return fdb_root_directory
