@@ -27,6 +27,7 @@ dependencies = [
     "django~=4.2",
     "pillow>=11.0.0",
     "tethys-dataset-services>=2.4.1",
+    "pygeoutils"
 ]
 requires-python = ">=3.12"
 readme = "README.md"
