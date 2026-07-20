@@ -5,7 +5,6 @@ import subprocess
 import sys
 
 import osgeo
-from pyproj import datadir
 import pytz
 import timezonefinder
 

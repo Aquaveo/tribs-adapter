@@ -147,7 +147,7 @@ def main(
     print('\nRunning NLDAS data retrieval....')
     lat, lon, _gmt = met.polygon_centroid_to_geographic(watershed)
     ds_elev = _get_nldas_elevation(dir)
-    elev = float(ds_elev.NLDAS_elev.sel(lon=lon, lat=lat, method='nearest').values)
+    elev = ds_elev.NLDAS_elev.sel(lon=lon, lat=lat, method='nearest').item()
 
     # 5. Run met workflow
     # Write the .netrc file for Earthdata Login authentication
@@ -158,6 +158,7 @@ def main(
     if not password:
         raise ValueError('EARTHDATA_PASSWORD not found. Set EARTHDATA_PASSWORD in the environment variables.')
 
+    os.environ['HOME'] = dir
     NETRC_PATH = os.path.expanduser('~/.netrc')
     try:
         with open(NETRC_PATH, 'w') as f:
