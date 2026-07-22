@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, UTC
 from unittest import mock
 
 import pytest
@@ -31,7 +31,7 @@ def minimal_project(temp_file_database):
     project = Project(
         name="Test Project",
         description="Test Project Description",
-        date_created=datetime.datetime.utcnow(),
+        date_created=datetime.now(UTC).replace(tzinfo=None),
         created_by="_staff",
         file_database=temp_file_database.instance,
     )
