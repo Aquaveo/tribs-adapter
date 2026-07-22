@@ -9,7 +9,6 @@ import numpy as np
 import pygltflib
 from pyproj import Transformer, CRS
 from PIL import Image
-
 import matplotlib
 
 matplotlib.use('Agg')
@@ -463,7 +462,6 @@ class tRIBSMeshViz:
                 bufferView=0,
                 componentType=pygltflib.UNSIGNED_INT,
                 count=self.triangles.size,
-                # type=pygltflib.VEC3,
                 type=pygltflib.SCALAR,
                 max=[int(self.triangles.max())],
                 min=[int(self.triangles.min())],
