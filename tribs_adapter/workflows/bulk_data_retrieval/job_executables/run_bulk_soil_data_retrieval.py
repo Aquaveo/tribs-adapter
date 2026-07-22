@@ -10,7 +10,6 @@
 import sys
 import pathlib
 from pytRIBS.classes import Soil
-from osgeo import gdal, ogr, osr
 
 from tribs_adapter.common.dataset_types import DatasetTypes
 from tribs_adapter.common.soil_data_types import depths, soil_vars
