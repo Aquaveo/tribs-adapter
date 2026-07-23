@@ -1,7 +1,7 @@
+import os
+import sys
 from unittest import mock
-
 import pytest
-import pyproj
 
 from tribs_adapter.workflows.utilities import (
     get_gmt_offset, safe_str, get_condor_fdb_root, get_condor_proj_dir, get_geoserver_ports, get_gdal_data_dirs,
@@ -51,7 +51,9 @@ def test_get_condor_fdb_root():
 
 def test_get_condor_proj_dir():
     with mock.patch.dict('os.environ', {}, clear=True):
-        assert get_condor_proj_dir(debug=True) == {'PROJ_DATA': pyproj.datadir.get_data_dir(), 'PROJ_DEBUG': '3'}
+        assert get_condor_proj_dir(debug=True) == {
+            'PROJ_DATA': os.path.join(sys.prefix, 'share', 'proj'), 'PROJ_DEBUG': '3'
+        }
         assert get_condor_proj_dir(debug=False) == {
             'PROJ_DATA': '/var/lib/condor/micromamba/envs/tethys/share/proj',
             'PROJ_DEBUG': '3'
