@@ -9,6 +9,7 @@ dependencies:
 - git
 - gdal=3.4
 - psycopg2
+- libpq
 # ATCORE dependencies
 - django=4.2
 - django-select2
