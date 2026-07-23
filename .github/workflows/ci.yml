@@ -79,7 +79,9 @@ jobs:
         run: python -m pip install pdm
 
       - name: Install project dependencies
-        run: pdm install -G:all
+        run: |
+          pdm use -f "$CONDA_PREFIX/bin/python"
+          pdm install -G:all
 
       - name: Install tethysext-atcore
         run: pip install --upgrade git+https://github.com/Aquaveo/tethysext-atcore.git@master

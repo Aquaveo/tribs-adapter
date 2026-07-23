@@ -4,11 +4,11 @@ channels:
 - conda-forge
 
 dependencies:
-- python=3.10
+- python=3.13
 - cxx-compiler
 - git
-- gdal=3.4
-- psycopg2
+- gdal
+- psycopg2=2.9.12
 - libpq
 # ATCORE dependencies
 - django=4.2
