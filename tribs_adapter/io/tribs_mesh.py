@@ -9,7 +9,6 @@ import numpy as np
 import pygltflib
 from pyproj import Transformer, CRS
 from PIL import Image
-
 import matplotlib
 
 matplotlib.use('Agg')
@@ -141,9 +140,8 @@ class tRIBSMeshViz:
         else:
             for output_file in self.output_files:  # Get the file basename and clean out special characters
                 basefile_name = os.path.basename(output_file).replace('.', '-')
-                if output_variables is None:
-                    output_variables = self.data[output_file].keys()
-                for variable in output_variables:
+                file_variables = output_variables if output_variables is not None else self.data[output_file].keys()
+                for variable in file_variables:
                     gltf_file_path = Path(f'{gltf_path}_{basefile_name}_{variable}.gltf')
                     gltf, variable_data = self._build_gltf(
                         localized_nodes, output_file, variable, color_ramp_file=color_ramp_file
@@ -464,7 +462,6 @@ class tRIBSMeshViz:
                 bufferView=0,
                 componentType=pygltflib.UNSIGNED_INT,
                 count=self.triangles.size,
-                # type=pygltflib.VEC3,
                 type=pygltflib.SCALAR,
                 max=[int(self.triangles.max())],
                 min=[int(self.triangles.min())],

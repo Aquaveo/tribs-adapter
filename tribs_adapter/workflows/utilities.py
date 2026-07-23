@@ -2,9 +2,9 @@ import os
 from datetime import datetime
 from pathlib import Path
 import subprocess
+import sys
 
 import osgeo
-from pyproj import datadir
 import pytz
 import timezonefinder
 
@@ -67,9 +67,12 @@ def get_condor_proj_dir(debug=False):
     """This function should only be called in an app-available environment (don't call in job scripts)."""
     CONTAINER_PROJ_DIR = '/var/lib/condor/micromamba/envs/tethys/share/proj'
 
-    # If in debug mode, use the local proj lib as fallback, otherwise use the container proj as fallback
+    # If in debug mode, use the local proj lib as fallback, otherwise use the container proj as fallback.
+    # NOTE: Don't use pyproj.datadir.get_data_dir() here: pip-installed pyproj bundles its own proj.db (v4),
+    # while the activated conda environment uses conda's proj.db (v6) via its proj activation hook. Condor
+    # jobs must use the same proj.db as the local environment, so point at the env's share/proj explicitly.
     if debug:
-        fallback = datadir.get_data_dir()
+        fallback = os.path.join(sys.prefix, 'share', 'proj')
     else:
         fallback = CONTAINER_PROJ_DIR
 

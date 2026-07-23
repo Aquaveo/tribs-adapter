@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 import pytest
 import tempfile
-import filecmp
 import numpy as np
 
 gltf_files = [
@@ -50,7 +49,7 @@ def test_tRIBSMeshViz_compute_normals(tmv_factory, files_dir, mesh_basename):
 
 
 @pytest.mark.parametrize('mesh_basename', gltf_files)
-def test_tRIBSMeshViz_to_gltf_no_normals(tmv_factory, files_dir, mesh_basename, get_expected_gltf):
+def test_tRIBSMeshViz_to_gltf_no_normals(tmv_factory, files_dir, mesh_basename, get_expected_gltf, assert_gltf_equal):
     mesh_epsg = '32613'
     tmv = tmv_factory(mesh_basename, mesh_epsg)
     color_ramp_file = os.path.join(files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'RedToBlue.png')
@@ -58,13 +57,12 @@ def test_tRIBSMeshViz_to_gltf_no_normals(tmv_factory, files_dir, mesh_basename, 
     gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
     gltf_file = f'{gltf_file_base_name}.gltf'
     tmv.to_gltf(gltf_file_base_name, mesh_epsg, color_ramp_file=color_ramp_file)
-
     assert os.path.exists(gltf_file)
-    assert filecmp.cmp(gltf_file, get_expected_gltf(mesh_basename), shallow=False)
+    assert_gltf_equal(gltf_file, get_expected_gltf(mesh_basename))
 
 
 @pytest.mark.parametrize('mesh_basename', gltf_files)
-def test_tRIBSMeshViz_to_gltf_normals(tmv_factory, files_dir, mesh_basename, get_expected_gltf):
+def test_tRIBSMeshViz_to_gltf_normals(tmv_factory, files_dir, mesh_basename, get_expected_gltf, assert_gltf_equal):
     # Test Data
     mesh_epsg = '32613'
     tmv = tmv_factory(mesh_basename, mesh_epsg)
@@ -83,7 +81,7 @@ def test_tRIBSMeshViz_to_gltf_normals(tmv_factory, files_dir, mesh_basename, get
     assert tmv.data == expected_data
 
     assert os.path.exists(gltf_file)
-    assert filecmp.cmp(gltf_file, get_expected_gltf(mesh_basename), shallow=False)
+    assert_gltf_equal(gltf_file, get_expected_gltf(mesh_basename))
 
 
 def test_parse_output_data(tmv_factory):
@@ -163,7 +161,7 @@ def test_output_files(tmv_factory):
     assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Srf.gltf")
 
 
-def test_given_color_ramp_file(tmv_factory, files_dir, get_expected_gltf):
+def test_given_color_ramp_file(tmv_factory, files_dir, get_expected_gltf, assert_gltf_equal):
     """Test that the color ramp file is used when provided."""
     mesh_basename = 'salas_outputs'
     mesh_epsg = '32613'
@@ -181,7 +179,7 @@ def test_given_color_ramp_file(tmv_factory, files_dir, get_expected_gltf):
 
     assert os.path.exists(gltf_file)
     expected = get_expected_gltf(mesh_basename)
-    assert filecmp.cmp(gltf_file, expected, shallow=False)
+    assert_gltf_equal(gltf_file, expected)
 
 
 def test_reassign_bad_z_values(tmv_factory, caplog):

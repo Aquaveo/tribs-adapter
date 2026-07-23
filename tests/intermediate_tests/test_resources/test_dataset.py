@@ -492,7 +492,7 @@ def test_dataset_duplicate(dataset_with_files):
     assert dp_fcc.instance.meta['dataset_type'] == og_dataset.dataset_type
     assert dp_fcc.instance.meta['description'] \
         == f'File collection for dataset "Duplicated Dataset" ({str(dp_dataset.id)})'
-    assert [f for f in dp_fcc.files] == [f for f in og_fcc.files]
+    assert sorted(dp_fcc.files) == sorted(og_fcc.files)
 
     db_session = object_session(dp_dataset)
     db_session.delete(dp_dataset)

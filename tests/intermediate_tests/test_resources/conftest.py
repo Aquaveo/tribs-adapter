@@ -1,6 +1,5 @@
-import datetime
+from datetime import datetime, UTC
 import warnings
-
 import pytest
 from sqlalchemy.orm import object_session
 
@@ -13,7 +12,7 @@ def minimal_scenario():
     scenario = Scenario(
         name="Test Scenario",
         description="Test Scenario Description",
-        date_created=datetime.datetime.utcnow(),
+        date_created=datetime.now(UTC).replace(tzinfo=None),
         created_by="_staff",
     )
     return scenario
@@ -25,7 +24,7 @@ def scenario_with_project(project_with_fdb):
     scenario = Scenario(
         name="Test Scenario",
         description="Test Scenario Description",
-        date_created=datetime.datetime.utcnow(),
+        date_created=datetime.now(UTC).replace(tzinfo=None),
         created_by="_staff",
     )
     scenario.project = project_with_fdb
@@ -68,7 +67,7 @@ def minimal_dataset():
     dataset = Dataset(
         name="Test Dataset",
         description="Test Dataset Description",
-        date_created=datetime.datetime.utcnow(),
+        date_created=datetime.now(UTC).replace(tzinfo=None),
         created_by="_staff",
     )
     return dataset
@@ -79,7 +78,7 @@ def minimal_realization():
     realization = Realization(
         name="Test Realization",
         description="Test Realization Description",
-        date_created=datetime.datetime.utcnow(),
+        date_created=datetime.now(UTC).replace(tzinfo=None),
         created_by="_staff",
     )
     return realization

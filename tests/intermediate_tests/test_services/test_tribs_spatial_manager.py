@@ -93,7 +93,7 @@ def test_create_time_dynamic_raster_layer(tsm, time_dynamic_dataset, node_file_d
 
     dataset_path = time_dynamic_dataset.file_collection_client.path
     assert os.path.exists(os.path.join(dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 224
+    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 228
 
     tsm.delete_tribs_tin_layer(time_dynamic_dataset)
     assert not os.path.exists(os.path.join(dataset_path, 'gltf'))
