@@ -3,13 +3,15 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import rasterio
 from rasterio.transform import from_origin
 from shapely.geometry import Polygon, box
 
 from tribs_adapter.common.dataset_types import DatasetTypes
 from tribs_adapter.workflows.prepare_land_cover.helpers import (
     LDT_COLUMNS, build_ldt_dataframe, extract_valid_class_ids, get_input_file_path_from_dataset,
-    validate_raster_covers_geometry
+    validate_raster_covers_geometry, write_numpy_array_to_asc_file, write_numpy_array_to_geotiff_file,
+    write_numpy_array_to_raster_file
 )
 
 
@@ -175,3 +177,57 @@ def test_get_input_file_path_from_dataset_no_matching_file():
 
     with pytest.raises(FileNotFoundError, match='No file with extensions'):
         get_input_file_path_from_dataset(dataset)
+
+
+@pytest.mark.parametrize(
+    'type,expected_driver', [
+        ('asc', 'AAIGrid'),
+        ('tif', 'GTiff'),
+    ]
+)
+def test_write_numpy_array_to_raster_file_driver(tmp_path, type, expected_driver):
+    path = str(tmp_path / f'raster.{type}')
+    array = np.array([[1, 2], [3, 4]], dtype='int32')
+
+    write_numpy_array_to_raster_file(
+        type, path, array, crs='EPSG:32612', transform=from_origin(0, 2, 1, 1), precision=0
+    )
+
+    with rasterio.open(path) as src:
+        assert src.driver == expected_driver
+
+
+def test_write_numpy_array_to_asc_file(tmp_path):
+    path = str(tmp_path / 'lu.asc')
+    array = np.array([
+        [1, 2],
+        [3, NODATA],
+    ], dtype='int32')
+    transform = from_origin(0, 2, 1, 1)
+
+    write_numpy_array_to_asc_file(path, array, crs='EPSG:32612', transform=transform, precision=0)
+
+    with rasterio.open(path) as src:
+        assert src.driver == 'AAIGrid'
+        assert src.nodata == NODATA  # default nodata
+        assert src.transform == transform
+        assert src.crs.to_epsg() == 32612
+        assert src.read(1).tolist() == array.tolist()
+
+
+def test_write_numpy_array_to_geotiff_file(tmp_path):
+    path = str(tmp_path / 'dem.tif')
+    array = np.array([
+        [1.5, 2.25],
+        [3.0, -1.0],
+    ], dtype='float32')
+    transform = from_origin(100, 200, 10, 10)
+
+    write_numpy_array_to_geotiff_file(path, array, crs='EPSG:4326', transform=transform, precision=2, nodata=-1.0)
+
+    with rasterio.open(path) as src:
+        assert src.driver == 'GTiff'
+        assert src.nodata == -1.0  # custom nodata
+        assert src.transform == transform
+        assert src.crs.to_epsg() == 4326
+        assert src.read(1).tolist() == array.tolist()

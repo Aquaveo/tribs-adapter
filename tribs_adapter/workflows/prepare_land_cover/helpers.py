@@ -133,22 +133,7 @@ def read_tree_class_to_df(request, session, resource, work_step, *args, **kwargs
     Read the tree class from the previous step and return as a pandas DataFrame.
     """
     class_ids = work_step.workflow.get_attribute('class_ids')
-    columns = [
-        'ID',
-        'Free Throughfall Coefficient (P)',
-        'Canopy Field Capacity (S) (mm)',
-        'Drainage Coefficient (K) (mm/hr)',
-        'Drainage Exponent (b2) (mm/hr)',
-        'Albedo (Al)',
-        'Vegetation Height (h) (m)',
-        'Optical Transmission Coefficient (Kt)',
-        'Canopy-Average Stomatal Resistance (Rs) (s/m)',
-        'Vegetation Fraction (V)',
-        'Leaf Area Index (LAI)',
-        'Stress Threshold for Soil Evaporation (thetas)',
-        'Stress Threshold for Plant Transpiration (thetat)'
-    ]
-    dataset = pd.DataFrame(0.01, index=np.arange(len(class_ids)), columns=columns)
+    dataset = pd.DataFrame(0.01, index=np.arange(len(class_ids)), columns=list(LDT_PARAM_TO_COL))
     dataset['ID'] = class_ids
     dataset['ID'] = dataset['ID'].astype(int)
     dataset.fillna(0.01, inplace=True)
