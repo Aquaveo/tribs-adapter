@@ -10,14 +10,12 @@
 
 import tempfile
 import os
-import pandas as pd
-import numpy as np
 import rasterio
 
 from tethysext.atcore.services.resource_workflows.decorators import workflow_step_job
 from tribs_adapter.resources.dataset import Dataset
 from tribs_adapter.workflows.prepare_land_cover.helpers import (
-    write_numpy_array_to_asc_file, get_input_file_path_from_dataset
+    build_ldt_dataframe, write_numpy_array_to_asc_file, get_input_file_path_from_dataset
 )
 
 from tethysext.atcore.utilities import parse_url
@@ -89,37 +87,12 @@ def main(
     temp_dir = tempfile.TemporaryDirectory(dir=os.getcwd(), prefix='ldt_')
     # Get land use parameters
     land_use_params = workflow.get_step_by_name('Enter Land Use Parameters').get_parameter('dataset')
-    num_types = len(land_use_params['ID'])
-    columns = ["ID", "a", "b1", "P", "S", "K", "b2", "Al", "h", "Kt", "Rs", "V", "LAI", "thetas", "thetat"]
-    param_to_col = {
-        "ID": "ID",
-        "Free Throughfall Coefficient (P)": "P",
-        "Canopy Field Capacity (S) (mm)": "S",
-        "Drainage Coefficient (K) (mm/hr)": "K",
-        "Drainage Exponent (b2) (mm/hr)": "b2",
-        "Albedo (Al)": "Al",
-        "Vegetation Height (h) (m)": "h",
-        "Optical Transmission Coefficient (Kt)": "Kt",
-        "Canopy-Average Stomatal Resistance (Rs) (s/m)": "Rs",
-        "Vegetation Fraction (V)": "V",
-        "Leaf Area Index (LAI)": "LAI",
-        "Stress Threshold for Soil Evaporation (thetas)": "thetas",
-        "Stress Threshold for Plant Transpiration (thetat)": "thetat"
-    }
-    ldt_data = {}
-    for param, values in land_use_params.items():
-        if param in param_to_col:
-            column = param_to_col[param]
-            ldt_data[column] = values
-    df = pd.DataFrame(-9999, index=np.arange(num_types), columns=columns)
-    for col in columns:
-        if col in ldt_data:
-            df[col] = ldt_data[col]
+    df = build_ldt_dataframe(land_use_params)
 
     # Write out the .ldt file
     final_filepath = os.path.join(temp_dir.name, f'{output_name}.ldt')
     with open(final_filepath, 'w') as final_file:
-        final_file.write(f"{num_types} {len(columns)}\n")
+        final_file.write(f"{len(df)} {len(df.columns)}\n")
         df.to_csv(final_file, index=False, header=False, sep=' ')
 
     Dataset.new(
