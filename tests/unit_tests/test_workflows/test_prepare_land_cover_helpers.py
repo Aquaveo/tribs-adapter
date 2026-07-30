@@ -1,11 +1,24 @@
+import os
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from rasterio.transform import from_origin
 from shapely.geometry import Polygon, box
 
+from tribs_adapter.common.dataset_types import DatasetTypes
 from tribs_adapter.workflows.prepare_land_cover.helpers import (
-    LDT_COLUMNS, build_ldt_dataframe, extract_valid_class_ids, validate_raster_covers_geometry
+    LDT_COLUMNS, build_ldt_dataframe, extract_valid_class_ids, get_input_file_path_from_dataset,
+    validate_raster_covers_geometry
 )
+
+
+def fake_dataset(dataset_type, files, path='/data/collection'):
+    return SimpleNamespace(
+        dataset_type=dataset_type,
+        file_collection_client=SimpleNamespace(path=path, files=files),
+    )
+
 
 # 10x10 raster with 1x1 pixels covering (0, 0) to (10, 10)
 BOUNDS = (0.0, 0.0, 10.0, 10.0)
@@ -124,3 +137,41 @@ def test_build_ldt_dataframe_missing_params_filled_with_nodata():
     unmapped = [col for col in LDT_COLUMNS if col != 'ID']
     for col in unmapped:
         assert (df[col] == -9999).all()
+
+
+@pytest.mark.parametrize(
+    'dataset_type,files,expected', [
+        (DatasetTypes.RASTER_DISC_ASCII, ['dem.prj', 'dem.asc'], 'dem.asc'),
+        (DatasetTypes.RASTER_DISC_GEOTIFF, ['lu.tif'], 'lu.tif'),
+        (DatasetTypes.RASTER_DISC_GEOTIFF, ['lu.tiff'], 'lu.tiff'),
+        (DatasetTypes.FEATURES_SHAPEFILE, ['wb.dbf', 'wb.prj', 'wb.shp', 'wb.shx'], 'wb.shp'),
+    ]
+)
+def test_get_input_file_path_from_dataset(dataset_type, files, expected):
+    dataset = fake_dataset(dataset_type, files)
+
+    path = get_input_file_path_from_dataset(dataset)
+
+    assert path == os.path.join('/data/collection', expected)
+
+
+def test_get_input_file_path_from_dataset_skips_files_without_extension():
+    dataset = fake_dataset(DatasetTypes.RASTER_DISC_ASCII, ['README', 'dem.asc'])
+
+    path = get_input_file_path_from_dataset(dataset)
+
+    assert path == os.path.join('/data/collection', 'dem.asc')
+
+
+def test_get_input_file_path_from_dataset_unsupported_type():
+    dataset = fake_dataset(DatasetTypes.TRIBS_POINTS, ['mesh.points'])
+
+    with pytest.raises(ValueError, match='Unsupported dataset type'):
+        get_input_file_path_from_dataset(dataset)
+
+
+def test_get_input_file_path_from_dataset_no_matching_file():
+    dataset = fake_dataset(DatasetTypes.FEATURES_SHAPEFILE, ['wb.dbf', 'wb.prj'])
+
+    with pytest.raises(FileNotFoundError, match='No file with extensions'):
+        get_input_file_path_from_dataset(dataset)

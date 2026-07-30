@@ -181,7 +181,7 @@ def get_input_file_path_from_dataset(dataset):
         raise ValueError(f"Unsupported dataset type: {dataset_type}")
 
     for file in client.files:
-        ext = file.rsplit('.', 1)[1]
+        ext = os.path.splitext(file)[1].lstrip('.')
         if ext in file_extentions:
             return os.path.join(client.path, file)
 
