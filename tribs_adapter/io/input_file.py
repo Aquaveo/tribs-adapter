@@ -114,7 +114,7 @@ class RunOptions(BaseModel):
     HILLALBOPT: OptHillAlbedo = OptHillAlbedo.dynamic
     OPTRADSHELT: OptRadShelt = OptRadShelt.local
     OPTINTERCEPT: OptIntercept = OptIntercept.canopyWaterBalance
-    OPTLANDUSE: OptLanduse = OptLanduse.dynamic
+    OPTLANDUSE: OptLanduse = OptLanduse.static
     OPTLUINTERP: OptLuInterp = OptLuInterp.constant
     GFLUXOPTION: OptGFlux = OptGFlux.forceRestore
     METDATAOPTION: OptMetData = OptMetData.hydroMetGrid
