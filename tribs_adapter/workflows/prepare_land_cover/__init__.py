@@ -85,7 +85,8 @@ class PrepareLandCoverWorkflow(TribsWorkflow):
                 'fixed_rows': True,
                 'column_bounds': {
                     'Free Throughfall Coefficient (P)': {
-                        'min': 0.01
+                        'min': 0.01,
+                        'max': 1.0
                     },
                     'Canopy Field Capacity (S) (mm)': {
                         'min': 0.01
@@ -97,19 +98,22 @@ class PrepareLandCoverWorkflow(TribsWorkflow):
                         'min': 0.01
                     },
                     'Albedo (Al)': {
-                        'min': 0.01
+                        'min': 0.01,
+                        'max': 1.0
                     },
                     'Vegetation Height (h) (m)': {
                         'min': 0.01
                     },
                     'Optical Transmission Coefficient (Kt)': {
-                        'min': 0.01
+                        'min': 0.01,
+                        'max': 1.0
                     },
                     'Canopy-Average Stomatal Resistance (Rs) (s/m)': {
                         'min': 0.01
                     },
                     'Vegetation Fraction (V)': {
-                        'min': 0.01
+                        'min': 0.01,
+                        'max': 1.0
                     },
                     'Leaf Area Index (LAI)': {
                         'min': 0.01
