@@ -183,7 +183,7 @@ OPTINTERCEPT: 	Option for interception scheme 2
 2
 
 OPTLANDUSE:	Option for static or dynamic land cover
-1
+0
 
 OPTLUINTERP:	Option for interpolation of land cover 
 0

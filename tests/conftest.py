@@ -1,7 +1,6 @@
 from pathlib import Path
 from uuid import UUID
 from datetime import datetime
-
 import pytest
 
 from tribs_adapter.io.options import (
@@ -1332,7 +1331,7 @@ def salas_raw_paths():
             "OPTGWFILE": OptGwFile.grid,
             "OPTRUNON": OptRunon.noRunon,
             'HILLALBOPT': OptHillAlbedo.dynamic,
-            'OPTLANDUSE': OptLanduse.dynamic,
+            'OPTLANDUSE': OptLanduse.static,
             'OPTLUINTERP': OptLuInterp.constant,
             'OPTPERCOLATION': OptPercolation.inactive,
             'OPTRADSHELT': OptRadShelt.local,
@@ -1646,7 +1645,7 @@ def salas_raw_paths_copy_update():
             "OPTGWFILE": OptGwFile.grid,
             "OPTRUNON": OptRunon.noRunon,
             'HILLALBOPT': OptHillAlbedo.dynamic,
-            'OPTLANDUSE': OptLanduse.dynamic,
+            'OPTLANDUSE': OptLanduse.static,
             'OPTLUINTERP': OptLuInterp.constant,
             'OPTPERCOLATION': OptPercolation.inactive,
             'OPTRADSHELT': OptRadShelt.local,
