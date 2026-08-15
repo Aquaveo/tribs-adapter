@@ -45,6 +45,7 @@ prepare_land_cover = "tribs_adapter.workflows.prepare_land_cover:PrepareLandCove
 run_simulation = "tribs_adapter.workflows.run_simulation:RunSimulationWorkflow"
 delineate_hydrologic_features_from_point = "tribs_adapter.workflows.delineate_hydrologic_features_from_point:DelineateHydrologicFeaturesFromPointWorkflow"
 generate_tin = "tribs_adapter.workflows.generate_tin:GenerateTinWorkflow"
+prepare_parallelization = "tribs_adapter.workflows.prepare_parallelization:PrepareParallelizationWorkflow"
 
 [tool.pdm]
 
