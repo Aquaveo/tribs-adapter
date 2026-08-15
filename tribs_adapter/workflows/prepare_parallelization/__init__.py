@@ -48,7 +48,7 @@ class PrepareParallelizationWorkflow(TribsWorkflow):
             name='Select Datasets',
             order=10,
             help="Select a TIN dataset and a Stream dataset (optional).",
-            options={'param_class': 'prepare_parallelization.step_params.DatasetParam'},
+            options={'param_class': 'tribs_adapter.workflows.prepare_parallelization.step_params.DatasetParam'},
             active_roles=[TribsRoles.ORG_USER, TribsRoles.ORG_ADMIN]
         )
         workflow.steps.append(select_tin_step)
@@ -80,7 +80,7 @@ class PrepareParallelizationWorkflow(TribsWorkflow):
             name='Configure Parallelization Options',
             order=30,
             help="Choose a parallelization approach and the number of processors to use in the parallel run of tRIBS.",
-            options={'param_class': 'prepare_parallelization.step_params.ModelSetupParam'},
+            options={'param_class': 'tribs_adapter.workflows.prepare_parallelization.step_params.ModelSetupParam'},
             active_roles=[TribsRoles.ORG_USER, TribsRoles.ORG_ADMIN]
         )
         workflow.steps.append(model_setup_step)
