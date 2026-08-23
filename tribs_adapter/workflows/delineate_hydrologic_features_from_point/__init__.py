@@ -7,26 +7,18 @@
 ********************************************************************************
 """
 import os
-import param
 
 from tribs_adapter.app_users import TribsRoles
-from tethysext.atcore.models.resource_workflow_steps import (SpatialInputRWS, SpatialCondorJobRWS)
+from tethysext.atcore.models.resource_workflow_steps import SpatialCondorJobRWS
 from tethysext.atcore.models.resource_workflow_steps.xms_tool_rws import XMSToolRWS
 from tribs_adapter.workflows.tribs_workflow import TribsWorkflow
 from tribs_adapter.workflows.utilities import get_condor_env
+from tribs_adapter.workflow_steps.select_point_rws import SelectPointRWS
 
 
 def validate_threshold_area(value):
     if float(value) <= 0:
         raise ValueError('Threshold area must be a positive number in square kilometers.')
-
-
-class PointAttributes(param.Parameterized):
-    point_name = param.String(
-        label="Name",
-        doc="Name of point that will be used to reference it in results.",
-        allow_None=False,  #: Required
-    )
 
 
 class DelineateHydrologicFeaturesFromPointWorkflow(TribsWorkflow):
@@ -91,19 +83,11 @@ class DelineateHydrologicFeaturesFromPointWorkflow(TribsWorkflow):
         )
         workflow.steps.append(xmstool_step)
 
-        select_point_step = SpatialInputRWS(
+        select_point_step = SelectPointRWS(
             name="Select a Pour Point",
             order=20,
             help="Choose a pourpoint to delineate the watershed."
             "The point should be located within the watershed of interest.",
-            options={
-                "shapes": ["points"],
-                "singular_name": "Point",
-                "plural_name": "Points",
-                "allow_shapefile": True,
-                "allow_drawing": True,
-                "attributes": PointAttributes(),
-            },
             geoserver_name=geoserver_name,
             map_manager=map_manager,
             spatial_manager=spatial_manager,
