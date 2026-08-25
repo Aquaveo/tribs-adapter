@@ -1,10 +1,10 @@
 #!/opt/tethys-python
 """
 ********************************************************************************
-* Name: workflows/delineate_hydrologic_features/job_executables/post_process.py
+* Name: workflows/delineate_hydrologic_features_from_point/job_executables/run_tool.py
 * Author: dgallup, ysun
-* Created On: Jan 18, 2024
-* Copyright: (c) Aquaveo 2024
+* Created On: Aug 18, 2026
+* Copyright: (c) Aquaveo 2026
 ********************************************************************************
 """
 import os
@@ -104,18 +104,27 @@ def main(
     delineate_hydrologic_features.set_gui_data_folder(tf_dir.name)
     current_test_folder(tf_dir.name)
 
-    # Set arguments  # TODO use the argument names instead of the index
+    # Set arguments by name
     arguments = delineate_hydrologic_features.initial_arguments()
-    arguments[0].value = os.path.basename(os.path.splitext(input_raster_file)[0])
-    arguments[1].value = pour_point_name
-    arguments[2].value = form_values["threshold_area_sq_km"]
-    arguments[3].value = preprocessing_engine
-    arguments[4].value = watersheds_basename
-    arguments[5].value = streamlines_basename
+    argument_values = {
+        "input_raster": os.path.basename(os.path.splitext(input_raster_file)[0]),
+        "pour_point_coverage": pour_point_name,
+        "threshold_area_sq_km": form_values["threshold_area_sq_km"],
+        "preprocessing_engine": preprocessing_engine,
+        "watershed_boundaries": watersheds_basename,
+        "stream_lines": streamlines_basename,
+    }
+    unknown_arguments = set(argument_values) - {argument.name for argument in arguments}
+    if unknown_arguments:
+        raise RuntimeError(f"Tool does not define the following arguments: {sorted(unknown_arguments)}")
+
+    for argument in arguments:
+        if argument.name in argument_values:
+            argument.value = argument_values[argument.name]
 
     print(f"\n\nArguments passed to the tool = {arguments}")
-    for idx, argument in enumerate(arguments):
-        print(f"\targument[{idx}].value = {argument.value}")
+    for argument in arguments:
+        print(f"\t{argument.name} = {argument.value}")
 
     # 4. Run XMSTool
     try:
