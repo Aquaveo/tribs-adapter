@@ -49,5 +49,6 @@ class SelectPointRWS(SpatialInputRWS):
             'allow_shapefile': True,
             'allow_drawing': True,
             'attributes': PointAttributes(),
+            'max_features': 1,
         })
         return default_options
