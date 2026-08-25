@@ -52,3 +52,51 @@ class SelectPointRWS(SpatialInputRWS):
             'max_features': 1,
         })
         return default_options
+
+    def validate(self):
+        """
+        Validates parameter values of this step, including that all features fall within
+        the extent of the input raster (stashed on the step by SelectPointMWV).
+
+        Returns:
+            bool: True if data is valid, else Raise exception.
+
+        Raises:
+            ValueError
+        """
+        super().validate()
+
+        raster_extent = self.get_attribute('raster_extent', None)
+        if not raster_extent:
+            return True
+
+        min_x, min_y, max_x, max_y = raster_extent
+        geometry = self.get_parameter('geometry') or {}
+
+        for feature in geometry.get('features', []):
+            coordinates = feature.get('geometry', {}).get('coordinates', [])
+            for x, y in self._iter_coordinates(coordinates):
+                if not (min_x <= x <= max_x and min_y <= y <= max_y):
+                    singular_name = self.options.get('singular_name', 'Feature').lower()
+                    raise ValueError(
+                        f'The {singular_name} must be located within the extent of the input raster.'
+                    )
+
+        return True
+
+    @classmethod
+    def _iter_coordinates(cls, coordinates):
+        """
+        Yield (x, y) pairs from arbitrarily nested GeoJSON coordinates (Point, LineString, Polygon, Multi*).
+
+        Args:
+            coordinates(list): The coordinates member of a GeoJSON geometry.
+
+        Yields:
+            tuple: (x, y) coordinate pairs.
+        """
+        if coordinates and isinstance(coordinates[0], (int, float)):
+            yield coordinates[0], coordinates[1]
+        else:
+            for nested in coordinates:
+                yield from cls._iter_coordinates(nested)
