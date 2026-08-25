@@ -7,4 +7,10 @@ class WatershedFromPourPointWebTool(WatershedFromPourPointTool):
         for argument in arguments:
             if argument.name == 'pour_point_coverage':
                 argument.hide = True
+            elif argument.name == 'preprocessing_engine':
+                argument.value = self.WHITEBOX_FULL_WORKFLOW
+            elif argument.name == 'watershed_boundaries':
+                argument.value = 'Watersheds'
+            elif argument.name == 'stream_lines':
+                argument.value = 'Streams'
         return arguments
