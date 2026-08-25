@@ -71,6 +71,13 @@ class SelectPointRWS(SpatialInputRWS):
             return True
 
         min_x, min_y, max_x, max_y = raster_extent
+
+        # Allow a small tolerance (1% of each dimension) so edge clicks are not rejected
+        tolerance_x = (max_x - min_x) * 0.01
+        tolerance_y = (max_y - min_y) * 0.01
+        min_x, min_y = min_x - tolerance_x, min_y - tolerance_y
+        max_x, max_y = max_x + tolerance_x, max_y + tolerance_y
+
         geometry = self.get_parameter('geometry') or {}
 
         for feature in geometry.get('features', []):
