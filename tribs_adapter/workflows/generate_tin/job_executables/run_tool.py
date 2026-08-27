@@ -26,6 +26,8 @@ from xms.tool_tribs.tribs import ExportTRibsMeshTool
 import xms.tool_tribs.tribs.export_tribs_mesh_tool as etm
 import xms.tool_tribs.tribs.run_meshbuilder_and_metis_tool as rmm
 
+from tribs_adapter.workflows.generate_tin.constants import REDIS_STREAM_LINES, REDIS_WATERSHED_BOUNDARIES
+
 
 @workflow_step_job
 def main(
@@ -52,8 +54,8 @@ def main(
     xmstool_step = workflow.get_step_by_name("tRIBS Ugrids from Watersheds")
     form_values = xmstool_step.get_parameters()["form-values"]["value"]["value"]
 
-    redis_watershed_base = os.path.basename(os.path.splitext(form_values["redis_watershed_boundaries"])[0])
-    redis_stream_base = os.path.basename(os.path.splitext(form_values["redis_stream_lines"])[0])
+    redis_watershed_base = REDIS_WATERSHED_BOUNDARIES
+    redis_stream_base = REDIS_STREAM_LINES
     output_grid_base = os.path.basename(os.path.splitext(form_values["output_grid"])[0])
 
     input_raster_dataset = resource_db_session.query(Dataset).get(form_values["input_raster"])

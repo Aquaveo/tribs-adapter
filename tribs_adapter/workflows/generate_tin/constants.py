@@ -1,0 +1,2 @@
+REDIS_WATERSHED_BOUNDARIES = 'Rewatersheds'
+REDIS_STREAM_LINES = 'Restreams'
