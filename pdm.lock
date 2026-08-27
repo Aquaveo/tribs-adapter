@@ -5,7 +5,7 @@
 groups = ["default", "lint", "test"]
 strategy = []
 lock_version = "4.5.0"
-content_hash = "sha256:15d83947148562db346a6c3c0dd04af65827e8f49d15dca56ccc6e7350071389"
+content_hash = "sha256:3a64e3ddc88fbd16b1be3bb99c960dc6280abb1d10a35ea2847f1ab24bfc8ba8"
 
 [[metadata.targets]]
 requires_python = ">=3.13"
@@ -3609,10 +3609,8 @@ name = "xmsmeshbuilder"
 version = "0.1.1"
 summary = "A package for the xmsmeshbuilder package."
 files = [
-    {file = "xmsmeshbuilder-0.1.1-py3-none-any.whl", hash = "sha256:1eaabfe462b71700a1b9c55af53cf53924a5f1103132f8d0c7e3583d0ad1a445"},
     {file = "xmsmeshbuilder-0.1.1-py3-none-any.whl", hash = "sha256:baae6b463688aa1f9c8998becd9e9384e0b7a893e2d6f5f2c175728a3ad512c4"},
     {file = "xmsmeshbuilder-0.1.1.tar.gz", hash = "sha256:4bf1f35cf77afa741c3e8ff53fb3e5ec957c9488bd4f5945a2d5c0c52cd2d760"},
-    {file = "xmsmeshbuilder-0.1.1.tar.gz", hash = "sha256:c1bebadaf0b86aed65f4878a814e0e8b7f7290456780c6a8c90a20630c3ce3e5"},
 ]
 
 [[package]]
@@ -3641,8 +3639,6 @@ version = "1.0.0"
 summary = "A package for the xmsmetis_srp package."
 files = [
     {file = "xmsmetis_srp-1.0.0-py3-none-any.whl", hash = "sha256:121f538d4aecfd0edc2d6da0855d3ba674f69ebee5985c59a51f7cb59e298a29"},
-    {file = "xmsmetis_srp-1.0.0-py3-none-any.whl", hash = "sha256:179634a73e0f32da97859a2bca1dab23a199460ba4eb6d6d2a5745e9006459bf"},
-    {file = "xmsmetis_srp-1.0.0.tar.gz", hash = "sha256:092af152c2f31c74dee146bcfe96c65852383261fdb942febcf69cd67809a70c"},
     {file = "xmsmetis_srp-1.0.0.tar.gz", hash = "sha256:e20777c49aa43a78ed50e85c9367b312a7ac7555e79ef44854fea2c5e20244e1"},
 ]
 
@@ -3723,8 +3719,6 @@ version = "2.3.16"
 summary = "A package for the xmswbtools package."
 files = [
     {file = "xmswbtools-2.3.16-py3-none-any.whl", hash = "sha256:00affe5f77d615d89cdb5399d9a7d58b99de3a7ed7f5d15c64f109d23a9cc61f"},
-    {file = "xmswbtools-2.3.16-py3-none-any.whl", hash = "sha256:62c40079de9632eab64e9103fb8f3cb73cc5f48fea3867c4e571d5bb601472c9"},
-    {file = "xmswbtools-2.3.16.tar.gz", hash = "sha256:55d3dc6a96f479c9ef2e336e662bba654ab277dfba35b25d91a2952debb916b8"},
     {file = "xmswbtools-2.3.16.tar.gz", hash = "sha256:63051e55bd6dbfbb079403a15d2fd3c024134717e4fe41d1af7e7a6cccb26073"},
 ]
 

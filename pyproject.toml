@@ -65,12 +65,9 @@ test = [
 lint = ["flake8>=5.0.4", "yapf>=0.32.0", "toml>=0.10.2"]
 
 [[tool.pdm.source]]
-name = "aquaveo-stable"
-url = "https://aquapi.aquaveo.com/aquaveo/stable/+simple/"
-
-[[tool.pdm.source]]
 name = "aquaveo-dev"
 url = "https://public.aquapi.aquaveo.com/aquaveo/dev/+simple/"
+include_packages = ["xms*"]
 
 [tool.pdm.scripts]
 test = "pytest"
