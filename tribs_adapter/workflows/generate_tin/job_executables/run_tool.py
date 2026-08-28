@@ -19,14 +19,13 @@ from tethysext.atcore.utilities import parse_url
 from tribs_adapter.common.dataset_types import DatasetTypes
 from tribs_adapter.resources import Dataset
 from tribs_adapter.services.tribs_spatial_manager import TribsSpatialManager
+from tribs_adapter.workflows.generate_tin.constants import REDIS_STREAM_LINES, REDIS_WATERSHED_BOUNDARIES
 from tethys_dataset_services.engines.geoserver_engine import GeoServerSpatialDatasetEngine
 
 from xms.tool.utilities.file_utils import current_test_folder
 from xms.tool_tribs.tribs import ExportTRibsMeshTool
 import xms.tool_tribs.tribs.export_tribs_mesh_tool as etm
 import xms.tool_tribs.tribs.run_meshbuilder_and_metis_tool as rmm
-
-from tribs_adapter.workflows.generate_tin.constants import REDIS_STREAM_LINES, REDIS_WATERSHED_BOUNDARIES
 
 
 @workflow_step_job

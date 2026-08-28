@@ -2143,12 +2143,12 @@ files = [
 
 [[package]]
 name = "platformdirs"
-version = "4.11.4"
+version = "4.11.5"
 requires_python = ">=3.10"
 summary = "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`."
 files = [
-    {file = "platformdirs-4.11.4-py3-none-any.whl", hash = "sha256:e34ff91a24bcddc6d939b878bdf3f5c437c9c46fe9e212b1bf455fdf1ee57586"},
-    {file = "platformdirs-4.11.4.tar.gz", hash = "sha256:f3373be828247211d0febabea97e238c3dfde8a60b3c90c32756fb52cb21556d"},
+    {file = "platformdirs-4.11.5-py3-none-any.whl", hash = "sha256:89f8d42695853b89c7170bd49bc3dc593f98a71e695ede88e06a3b247bc4563b"},
+    {file = "platformdirs-4.11.5.tar.gz", hash = "sha256:e8b31f4f8bcbbedef91a6b57a706255e4f148d2a4e01648382a0a47342539173"},
 ]
 
 [[package]]
@@ -3481,7 +3481,7 @@ files = [
 
 [[package]]
 name = "xmsconstraint"
-version = "6.0.9"
+version = "6.0.11"
 requires_python = ">=3.10"
 summary = "UGrid constraint library for XMS products"
 dependencies = [
@@ -3492,8 +3492,11 @@ dependencies = [
     "xmsinterp>=7.0.12",
 ]
 files = [
-    {file = "xmsconstraint-6.0.9-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:0079c1018ec4ca1cb35cac75b25eb30102263418c5629a553a1ae5a70ef24409"},
-    {file = "xmsconstraint-6.0.9-cp313-cp313-win_amd64.whl", hash = "sha256:5dbbe70a278fdef00501444dd28483c9299e626a16324c0e6c9f752d7599560f"},
+    {file = "xmsconstraint-6.0.11-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:77c0d0b0c3b13d49be649e06231762d6a24b2ca1124496527d80947c3c4b44fd"},
+    {file = "xmsconstraint-6.0.11-cp313-cp313-win_amd64.whl", hash = "sha256:31b3da6e9c2db1bcc6b9990b7037ed3cb647874a786fe614fc4bdd05008193b2"},
+    {file = "xmsconstraint-6.0.11-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:908b3de632fbb4bb578718d8a9a087714ec37e699bc94bd75e732286b9f73815"},
+    {file = "xmsconstraint-6.0.11-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:cf875398580fecccc7b9cc2055bebccc39cf11e48b4974eed205ed723b505e9a"},
+    {file = "xmsconstraint-6.0.11-cp314-cp314-win_amd64.whl", hash = "sha256:5bb0146c31333e8f76808d1f667e33e33e15d22a820f0249fb2b5c067df0a961"},
 ]
 
 [[package]]
@@ -3552,7 +3555,7 @@ files = [
 
 [[package]]
 name = "xmsgdal"
-version = "4.0.5"
+version = "4.1.0"
 requires_python = ">=3.10"
 summary = ""
 dependencies = [
@@ -3564,7 +3567,7 @@ dependencies = [
     "xmscore>=3.2.0",
 ]
 files = [
-    {file = "xmsgdal-4.0.5-py3-none-any.whl", hash = "sha256:93674540a2d07e3ffa1db7224fbb5edbf5afbcb431eb2e4022dfb9a901867614"},
+    {file = "xmsgdal-4.1.0-py3-none-any.whl", hash = "sha256:8b147e32391edfe4f7912d80a94f82f344b23f9314a50c5180088a1f83f0f0aa"},
 ]
 
 [[package]]
@@ -3699,18 +3702,19 @@ files = [
 
 [[package]]
 name = "xmstool-tribs"
-version = "1.0.1"
+version = "1.0.2"
 requires_python = ">=3.10"
 summary = ""
 dependencies = [
     "Shapely",
     "pytest",
+    "xmsgdal>=4.1.0",
     "xmsmeshbuilder>=0.1.0",
     "xmsmetis-srp>=1.0.0",
     "xmstool>=10.1.0",
 ]
 files = [
-    {file = "xmstool_tribs-1.0.1-py3-none-any.whl", hash = "sha256:418c059d8dc7485a54af304bd9de415a3a4cd48519e25e01cad4b6c14c692e2e"},
+    {file = "xmstool_tribs-1.0.2-py3-none-any.whl", hash = "sha256:53304c00fd3c48a2711c9c94a1ed73c670ed6757d6311e78ac8d475ce56d8967"},
 ]
 
 [[package]]
