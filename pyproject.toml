@@ -43,6 +43,7 @@ prepare_met = "tribs_adapter.workflows.prepare_met_forcings:PrepareMetWorkflow"
 prepare_soils = "tribs_adapter.workflows.prepare_soil_parameters:PrepareSoilsWorkflow"
 prepare_land_cover = "tribs_adapter.workflows.prepare_land_cover:PrepareLandCoverWorkflow"
 run_simulation = "tribs_adapter.workflows.run_simulation:RunSimulationWorkflow"
+delineate_hydrologic_features_from_point = "tribs_adapter.workflows.delineate_hydrologic_features_from_point:DelineateHydrologicFeaturesFromPointWorkflow"
 generate_tin = "tribs_adapter.workflows.generate_tin:GenerateTinWorkflow"
 
 [tool.pdm]

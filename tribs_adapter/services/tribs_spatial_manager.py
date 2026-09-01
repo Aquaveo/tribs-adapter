@@ -180,10 +180,16 @@ class TribsSpatialManager(ResourceSpatialManager):
             bbox = json[response_location]['latLonBoundingBox']
 
         if bbox is not None:
+            # Buffer the extent outward proportionally to its size. Note: scaling the
+            # coordinates themselves (e.g. minx / buffer_factor) shrinks the extent
+            # instead of buffering it when coordinates are negative (west/south).
+            buffer_x = (bbox['maxx'] - bbox['minx']) * (buffer_factor - 1)
+            buffer_y = (bbox['maxy'] - bbox['miny']) * (buffer_factor - 1)
+
             # minx, miny, maxx, maxy
             extent = [
-                bbox['minx'] / buffer_factor, bbox['miny'] / buffer_factor, bbox['maxx'] * buffer_factor,
-                bbox['maxy'] * buffer_factor
+                bbox['minx'] - buffer_x, bbox['miny'] - buffer_y, bbox['maxx'] + buffer_x,
+                bbox['maxy'] + buffer_y
             ]
 
         # order extent to be min_x min_y max_x max_y
