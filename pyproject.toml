@@ -27,9 +27,10 @@ dependencies = [
     "django~=4.2",
     "pillow>=11.0.0",
     "tethys-dataset-services>=2.4.1",
-    "pygeoutils"
+    "pygeoutils",
+    "xmstool-tribs"
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 readme = "README.md"
 license = { text = "MIT" }
 
@@ -43,6 +44,7 @@ prepare_soils = "tribs_adapter.workflows.prepare_soil_parameters:PrepareSoilsWor
 prepare_land_cover = "tribs_adapter.workflows.prepare_land_cover:PrepareLandCoverWorkflow"
 run_simulation = "tribs_adapter.workflows.run_simulation:RunSimulationWorkflow"
 delineate_hydrologic_features_from_point = "tribs_adapter.workflows.delineate_hydrologic_features_from_point:DelineateHydrologicFeaturesFromPointWorkflow"
+generate_tin = "tribs_adapter.workflows.generate_tin:GenerateTinWorkflow"
 
 [tool.pdm]
 
@@ -62,6 +64,11 @@ test = [
     "typing-extensions>=4.12",
 ]
 lint = ["flake8>=5.0.4", "yapf>=0.32.0", "toml>=0.10.2"]
+
+[[tool.pdm.source]]
+name = "aquaveo-dev"
+url = "https://public.aquapi.aquaveo.com/aquaveo/dev/+simple/"
+include_packages = ["xms*"]
 
 [tool.pdm.scripts]
 test = "pytest"
