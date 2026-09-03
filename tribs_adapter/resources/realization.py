@@ -233,6 +233,13 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
         self.input_file = tribs_input
         session.commit()
 
+        if not self.linked_datasets:
+            log.warning(
+                f'No output datasets were created for Realization "{self.name}" ({self.id}) from model_root '
+                f'"{model_root}". Verify that the output file paths in the Scenario input file exist relative to '
+                f'the model root.'
+            )
+
         # Generate visualization if spatial_manager is given
         if spatial_manager is not None:
             for dataset in self.linked_datasets:
