@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -220,18 +219,18 @@ class Scenario(Resource, InputFileAttrMixin, SridAttrMixin, ProjectChildMixin, L
             directory: Directory to export the input file and input files to.
         """
         from .dataset import Dataset
-        # Validate directory
-        dir_path = Path(directory)  # ensure is a Path object
-        if not dir_path.is_dir():
-            raise ValueError(f'directory "{directory}" is not a directory.')
+        # Ensure directory exists
+        dir_path = Path(directory)
+        dir_path.mkdir(parents=True, exist_ok=True)
 
-        # write the input file
+        # Write the input file
         self.input_file.to_input_file(dir_path)
 
         if not with_datasets:
             return
 
-        # write the datasets
+        # Write the datasets
+        # Reconstruct the same directory structure as the input file expects
         session = object_session(self)
         for card, f in self.input_file.files(mode=self.input_file.FilesMode.INPUT_ONLY):
             if not f.resource_id or not f.path:
@@ -240,23 +239,21 @@ class Scenario(Resource, InputFileAttrMixin, SridAttrMixin, ProjectChildMixin, L
             dataset = session.query(Dataset).get(f.resource_id)
             path_is_directory = FILE_TO_DATASET.get(card, {}).get('is_directory', False)
 
-            # Append STARTDATE to LUGRID files before extension
-            if card == 'LUGRID':
-                client = dataset.file_collection_client
-                startdate = self.input_file.run_parameters.time_variables.STARTDATE.strftime('%m%d%Y%H')
-                dir = client.path
-                for file in client.files:
-                    old_file = f'{dir}/{file}'
-                    if file.endswith('.asc'):
-                        new_file = f'{dir}/{file[:2]}{startdate}.asc'  # e.g., LA0928202400.asc
-                        os.rename(old_file, new_file)
-                    elif file.endswith('.aux.xml'):
-                        os.remove(old_file)
-
-            # Reconstruct the same directory structure as the input file expects
             if not path_is_directory:
-                sub_dirs = Path(f.path).parent  # e.g. "Input/salas.soi" or "Input/Nodes/oNodes.dat"
-                dataset.export(dir_path / sub_dirs)  # e.g. "/tmp/srp_assemble__mqce9rj/Input"
+                sub_dirs = Path(f.path).parent
+                export_dir = dir_path / sub_dirs
+                dataset.export(export_dir)
+                # Append STARTDATE to LUGRID files before extension
+                if card == 'LUGRID':
+                    # tRIBS expects land-use grids named <prefix><STARTDATE>.asc, e.g. LA0928202400.asc
+                    startdate = self.input_file.run_parameters.time_variables.STARTDATE.strftime('%m%d%Y%H')
+                    for file in dataset.file_collection_client.files:
+                        exported = export_dir / file
+                        if file.endswith('.asc'):
+                            exported.rename(exported.with_name(f'{exported.name[:2]}{startdate}.asc'))
+                        elif file.endswith('.aux.xml'):
+                            exported.unlink()
+
                 if Path(f.path).suffix == '.gdf':
                     # Prepend the folder path to the files listed in the .gdf file
                     file_path = dir_path / f.path
