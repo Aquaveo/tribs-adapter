@@ -250,6 +250,35 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
                         f'Failed to generate visualization for Dataset named "{dataset.name}" ({dataset.id}).'
                     )
 
+    def export(self, directory: Path | str, with_datasets: bool = True):
+        """Export the input file, input datasets, and output datasets for this Realization.
+
+        Args:
+            directory: Directory to export the input file and input files to.
+        """
+        from .dataset import Dataset
+
+        dir_path = Path(directory)
+
+        # Export the input file and input datasets
+        self.scenario.export(directory, with_datasets=with_datasets)
+        # Overwrites scenario .in with realization .in
+        self.input_file.to_input_file(dir_path)
+
+        if not with_datasets:
+            return
+
+        # Export output datasets
+        session = object_session(self)
+        for _card, field in self.input_file.files(mode=self.input_file.FilesMode.OUTPUT_ONLY):
+            for fdp in field.file_database_paths:
+                if not fdp.resource_id:
+                    continue
+
+                dataset = session.query(Dataset).get(fdp.resource_id)
+                if dataset is not None:
+                    dataset.export(dir_path / Path(field.path).parent)
+
     def serialize_custom_fields(self, d: dict):
         """Hook for app-specific subclasses to add additional fields to serialization.
 
