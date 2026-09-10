@@ -489,13 +489,31 @@ def test_scenario_export(
 
 
 @pytest.mark.filterwarnings('ignore::UserWarning')
-def test_scenario_export_directory_not_dir(scenario_with_input, files_dir, tmp_path):
+def test_scenario_export_creates_missing_directory(scenario_with_input, files_dir, tmp_path):
     input_file_path = files_dir / 'models' / 'salas' / 'salas.in'
 
     scenario = scenario_with_input(input_file_path)
 
-    with pytest.raises(ValueError):
-        scenario.export(tmp_path / 'out' / 'dne')
+    out_dir = tmp_path / 'out' / 'dne'
+    assert not out_dir.exists()
+
+    scenario.export(out_dir, with_datasets=False)
+
+    assert out_dir.is_dir()
+    assert (out_dir / 'salas.in').is_file()
+
+
+@pytest.mark.filterwarnings('ignore::UserWarning')
+def test_scenario_export_directory_is_file(scenario_with_input, files_dir, tmp_path):
+    input_file_path = files_dir / 'models' / 'salas' / 'salas.in'
+
+    scenario = scenario_with_input(input_file_path)
+
+    not_a_dir = tmp_path / 'out.txt'
+    not_a_dir.write_text('not a directory')
+
+    with pytest.raises(FileExistsError):
+        scenario.export(not_a_dir)
 
 
 def test_scenario_serialize(complete_project):
