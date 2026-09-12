@@ -424,6 +424,28 @@ def test_realization_export(complete_project, tmp_path):
     assert in_files[0].read_text() == expected_in.read_text()
 
 
+@pytest.mark.filterwarnings('ignore::UserWarning')
+def test_realization_export_ignores_scenario_changes(complete_project, tmp_path):
+    """Export uses the Realization's snapshot, not the Scenario's current input file or links."""
+    scenario = complete_project.scenarios[0]
+    realization = scenario.realizations[0]
+
+    # Diverge the scenario after the run: drop a linked input dataset and change a parameter
+    card = 'SOILTABLENAME'
+    dataset = object_session(scenario).query(Dataset).get(scenario.input_file.get_value(card).resource_id)
+    scenario.unlink_dataset(dataset, card)
+    scenario.update_input_file({'run_parameters': {'time_variables': {'RUNTIME': 1}}})
+
+    out_dir = tmp_path / 'out'
+    realization.export(out_dir)
+
+    # The unlinked dataset's files are still exported, and the .in is the realization's
+    assert _exported_files(out_dir) == unordered(salas_export_input_files + salas_export_output_files + ['salas.in'])
+    expected_in = realization.input_file.to_input_file(tmp_path / 'expected')
+    assert (out_dir / 'salas.in').read_text() == expected_in.read_text()
+    assert (out_dir / 'salas.in').read_text() != scenario.input_file.to_input_file(tmp_path / 'scenario').read_text()
+
+
 def test_realization_export_without_datasets(complete_project, tmp_path):
     realization = complete_project.scenarios[0].realizations[0]
     out_dir = tmp_path / 'out'

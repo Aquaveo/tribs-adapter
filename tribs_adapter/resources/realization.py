@@ -259,14 +259,16 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
         from .dataset import Dataset
 
         dir_path = Path(directory)
+        dir_path.mkdir(parents=True, exist_ok=True)
 
-        # Export the input file and input datasets
-        self.scenario.export(directory, with_datasets=with_datasets)
-        # Overwrites scenario .in with realization .in
+        # Export the input file
         self.input_file.to_input_file(dir_path)
 
         if not with_datasets:
             return
+
+        # Export input datasets
+        self.scenario._export_input_datasets(self.input_file, dir_path)
 
         # Export output datasets
         session = object_session(self)

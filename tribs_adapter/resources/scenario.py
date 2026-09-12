@@ -212,27 +212,11 @@ class Scenario(Resource, InputFileAttrMixin, SridAttrMixin, ProjectChildMixin, L
                 except Exception:
                     log.exception(f'Failed to generate visualization for Dataset named "{dataset.name}" ({dataset.id}.')
 
-    def export(self, directory: Path | str, with_datasets=True):
-        """Export the input file and input datasets for this Scenario.
-
-        Args:
-            directory: Directory to export the input file and input files to.
-        """
+    def _export_input_datasets(self, tribs_input: tRIBSInput, dir_path: Path):
         from .dataset import Dataset
-        # Ensure directory exists
-        dir_path = Path(directory)
-        dir_path.mkdir(parents=True, exist_ok=True)
-
-        # Write the input file
-        self.input_file.to_input_file(dir_path)
-
-        if not with_datasets:
-            return
-
-        # Write the datasets
         # Reconstruct the same directory structure as the input file expects
         session = object_session(self)
-        for card, f in self.input_file.files(mode=self.input_file.FilesMode.INPUT_ONLY):
+        for card, f in tribs_input.files(mode=tribs_input.FilesMode.INPUT_ONLY):
             if not f.resource_id or not f.path:
                 continue
 
@@ -246,7 +230,7 @@ class Scenario(Resource, InputFileAttrMixin, SridAttrMixin, ProjectChildMixin, L
                 # Append STARTDATE to LUGRID files before extension
                 if card == 'LUGRID':
                     # tRIBS expects land-use grids named <prefix><STARTDATE>.asc, e.g. LA0928202400.asc
-                    startdate = self.input_file.run_parameters.time_variables.STARTDATE.strftime('%m%d%Y%H')
+                    startdate = tribs_input.run_parameters.time_variables.STARTDATE.strftime('%m%d%Y%H')
                     for file in dataset.file_collection_client.files:
                         exported = export_dir / file
                         if file.endswith('.asc'):
@@ -260,6 +244,25 @@ class Scenario(Resource, InputFileAttrMixin, SridAttrMixin, ProjectChildMixin, L
                     self._prepend_folder_path_to_gdf_files(sub_dirs.name, file_path)
             else:
                 dataset.export(dir_path / f.path)  # e.g. "Forecast/" or "Restart/"
+
+    def export(self, directory: Path | str, with_datasets=True):
+        """Export the input file and input datasets for this Scenario.
+
+        Args:
+            directory: Directory to export the input file and input files to.
+        """
+        # Ensure directory exists
+        dir_path = Path(directory)
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Write the input file
+        self.input_file.to_input_file(dir_path)
+
+        if not with_datasets:
+            return
+
+        # Write the datasets
+        self._export_input_datasets(self.input_file, dir_path)
 
     def serialize_custom_fields(self, d: dict):
         """Hook for app-specific subclasses to add additional fields to serialization.
