@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -213,56 +212,57 @@ class Scenario(Resource, InputFileAttrMixin, SridAttrMixin, ProjectChildMixin, L
                 except Exception:
                     log.exception(f'Failed to generate visualization for Dataset named "{dataset.name}" ({dataset.id}.')
 
-    def export(self, directory: Path | str, with_datasets=True):
-        """Export the input file and input datasets for this Scenario.
-
-        Args:
-            directory: Directory to export the input file and input files to.
-        """
+    def _export_input_datasets(self, tribs_input: tRIBSInput, dir_path: Path):
         from .dataset import Dataset
-        # Validate directory
-        dir_path = Path(directory)  # ensure is a Path object
-        if not dir_path.is_dir():
-            raise ValueError(f'directory "{directory}" is not a directory.')
-
-        # write the input file
-        self.input_file.to_input_file(dir_path)
-
-        if not with_datasets:
-            return
-
-        # write the datasets
+        # Reconstruct the same directory structure as the input file expects
         session = object_session(self)
-        for card, f in self.input_file.files(mode=self.input_file.FilesMode.INPUT_ONLY):
+        for card, f in tribs_input.files(mode=tribs_input.FilesMode.INPUT_ONLY):
             if not f.resource_id or not f.path:
                 continue
 
             dataset = session.query(Dataset).get(f.resource_id)
             path_is_directory = FILE_TO_DATASET.get(card, {}).get('is_directory', False)
 
-            # Append STARTDATE to LUGRID files before extension
-            if card == 'LUGRID':
-                client = dataset.file_collection_client
-                startdate = self.input_file.run_parameters.time_variables.STARTDATE.strftime('%m%d%Y%H')
-                dir = client.path
-                for file in client.files:
-                    old_file = f'{dir}/{file}'
-                    if file.endswith('.asc'):
-                        new_file = f'{dir}/{file[:2]}{startdate}.asc'  # e.g., LA0928202400.asc
-                        os.rename(old_file, new_file)
-                    elif file.endswith('.aux.xml'):
-                        os.remove(old_file)
-
-            # Reconstruct the same directory structure as the input file expects
             if not path_is_directory:
-                sub_dirs = Path(f.path).parent  # e.g. "Input/salas.soi" or "Input/Nodes/oNodes.dat"
-                dataset.export(dir_path / sub_dirs)  # e.g. "/tmp/srp_assemble__mqce9rj/Input"
+                sub_dirs = Path(f.path).parent
+                export_dir = dir_path / sub_dirs
+                dataset.export(export_dir)
+                # Append STARTDATE to LUGRID files before extension
+                if card == 'LUGRID':
+                    # tRIBS expects land-use grids named <prefix><STARTDATE>.asc, e.g. LA0928202400.asc
+                    startdate = tribs_input.run_parameters.time_variables.STARTDATE.strftime('%m%d%Y%H')
+                    for file in dataset.file_collection_client.files:
+                        exported = export_dir / file
+                        if file.endswith('.asc'):
+                            exported.rename(exported.with_name(f'{exported.name[:2]}{startdate}.asc'))
+                        elif file.endswith('.aux.xml'):
+                            exported.unlink()
+
                 if Path(f.path).suffix == '.gdf':
                     # Prepend the folder path to the files listed in the .gdf file
                     file_path = dir_path / f.path
                     self._prepend_folder_path_to_gdf_files(sub_dirs.name, file_path)
             else:
                 dataset.export(dir_path / f.path)  # e.g. "Forecast/" or "Restart/"
+
+    def export(self, directory: Path | str, with_datasets=True):
+        """Export the input file and input datasets for this Scenario.
+
+        Args:
+            directory: Directory to export the input file and input files to.
+        """
+        # Ensure directory exists
+        dir_path = Path(directory)
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Write the input file
+        self.input_file.to_input_file(dir_path)
+
+        if not with_datasets:
+            return
+
+        # Write the datasets
+        self._export_input_datasets(self.input_file, dir_path)
 
     def serialize_custom_fields(self, d: dict):
         """Hook for app-specific subclasses to add additional fields to serialization.

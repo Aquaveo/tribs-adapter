@@ -373,3 +373,113 @@ def test_realization_delete_children(complete_project):
     assert len(project.scenarios) == 1
     assert len(project.scenarios[0].realizations) == 1
     assert all(session.query(Dataset).get(did) is None for did in dataset_ids)
+
+
+# Files written by Scenario.export for the salas model (input datasets and mesh)
+salas_export_input_files = [
+    'Input/Nodes/hNodes.dat', 'Input/Nodes/oNodes.dat', 'Input/Nodes/pNodes.dat',
+    'Input/salas.iwt', 'Input/salas.lan', 'Input/salas.ldt', 'Input/salas.points',
+    'Input/salas.sdt', 'Input/salas.soi',
+    'Output/voronoi/salas.edges', 'Output/voronoi/salas.tri', 'Output/voronoi/salas.nodes',
+    'Output/voronoi/salas_area', 'Output/voronoi/salas_reach', 'Output/voronoi/salas_voi',
+    'Output/voronoi/salas_width', 'Output/voronoi/salas.z',
+    'Rain/p0531200418.txt', 'Rain/p0630200417.txt',
+    'Weather/weatherC1601_2004.sdf', 'Weather/weatherC1601_2004.mdf',
+]
+
+# Files written by Realization.export for the salas model (output datasets)
+salas_export_output_files = [
+    'Output/voronoi/salas.0000_00d', 'Output/voronoi/salas.0010_00d', 'Output/voronoi/salas.0700_00d',
+    'Output/voronoi/salas.0000_00i', 'Output/voronoi/salas.0700_00i',
+    'Output/voronoi/salas0.pixel',
+    'Output/hyd/salas0700_00.mrf', 'Output/hyd/salas.cntrl', 'Output/hyd/salas0700_00.rft',
+    'Output/hyd/salas_Outlet.qout',
+]
+
+
+def _exported_files(out_dir):
+    return [str(p.relative_to(out_dir)) for p in out_dir.glob('**/*') if p.is_file()]
+
+
+def _dataset_files(realization):
+    """Map dataset name to the sorted list of files in its collection."""
+    return {
+        d.name: sorted(f for f in d.file_collection_client.files if '__meta__' not in f)
+        for d in realization.linked_datasets
+    }
+
+
+def test_realization_export(complete_project, tmp_path):
+    realization = complete_project.scenarios[0].realizations[0]
+    out_dir = tmp_path / 'out'
+
+    realization.export(out_dir)
+
+    assert _exported_files(out_dir) == unordered(salas_export_input_files + salas_export_output_files + ['salas.in'])
+
+    # Exactly one input file, and it is the realization's
+    in_files = list(out_dir.glob('**/*.in'))
+    assert len(in_files) == 1
+    expected_in = realization.input_file.to_input_file(tmp_path / 'expected')
+    assert in_files[0].read_text() == expected_in.read_text()
+
+
+@pytest.mark.filterwarnings('ignore::UserWarning')
+def test_realization_export_ignores_scenario_changes(complete_project, tmp_path):
+    """Export uses the Realization's snapshot, not the Scenario's current input file or links."""
+    scenario = complete_project.scenarios[0]
+    realization = scenario.realizations[0]
+
+    # Diverge the scenario after the run: drop a linked input dataset and change a parameter
+    card = 'SOILTABLENAME'
+    dataset = object_session(scenario).query(Dataset).get(scenario.input_file.get_value(card).resource_id)
+    scenario.unlink_dataset(dataset, card)
+    scenario.update_input_file({'run_parameters': {'time_variables': {'RUNTIME': 1}}})
+
+    out_dir = tmp_path / 'out'
+    realization.export(out_dir)
+
+    # The unlinked dataset's files are still exported, and the .in is the realization's
+    assert _exported_files(out_dir) == unordered(salas_export_input_files + salas_export_output_files + ['salas.in'])
+    expected_in = realization.input_file.to_input_file(tmp_path / 'expected')
+    assert (out_dir / 'salas.in').read_text() == expected_in.read_text()
+    assert (out_dir / 'salas.in').read_text() != scenario.input_file.to_input_file(tmp_path / 'scenario').read_text()
+
+
+def test_realization_export_without_datasets(complete_project, tmp_path):
+    realization = complete_project.scenarios[0].realizations[0]
+    out_dir = tmp_path / 'out'
+
+    realization.export(out_dir, with_datasets=False)
+
+    assert _exported_files(out_dir) == ['salas.in']
+
+
+@pytest.mark.filterwarnings('ignore::UserWarning')
+def test_realization_export_round_trip(complete_project, tmp_path):
+    """A Realization initialized from an export has the same output datasets as the original."""
+    session = object_session(complete_project)
+    scenario = complete_project.scenarios[0]
+    original = scenario.realizations[0]
+    out_dir = tmp_path / 'out'
+
+    original.export(out_dir)
+
+    reimported = Realization.new(
+        session=session,
+        name='Reimported',
+        description='Realization created from an export.',
+        created_by='_staff',
+        scenario=scenario,
+        model_root=out_dir,
+    )
+
+    assert _dataset_files(reimported) == _dataset_files(original)
+    for card, field in reimported.input_file.files(mode=reimported.input_file.FilesMode.OUTPUT_ONLY):
+        original_field = original.input_file.get_value(card)
+        assert field.path == original_field.path
+        assert len(field.file_database_paths) == len(original_field.file_database_paths)
+
+    reimported.delete_children()
+    session.delete(reimported)
+    session.commit()

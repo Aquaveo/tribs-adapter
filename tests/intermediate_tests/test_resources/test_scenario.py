@@ -1,5 +1,7 @@
 import json
 import datetime
+import shutil
+from pathlib import Path
 from unittest import mock
 from uuid import UUID, uuid4
 
@@ -489,13 +491,80 @@ def test_scenario_export(
 
 
 @pytest.mark.filterwarnings('ignore::UserWarning')
-def test_scenario_export_directory_not_dir(scenario_with_input, files_dir, tmp_path):
+def test_scenario_export_lugrid(db_session, scenario_with_input, files_dir, tmp_path):
+    """LUGRID grids are renamed with STARTDATE and sidecars dropped in the export, not in the stored collection."""
+    # Copy the model so the shared fixture is not modified
+    model_root = tmp_path / 'model'
+    shutil.copytree(files_dir / 'models' / 'salas_issues', model_root)
+
+    # Add a land use grid referenced by the LUGRID .gdf file
+    land_cover_dir = model_root / 'LandCover'
+    (land_cover_dir / 'LA.asc').write_text('ncols 1\nnrows 1\nxllcorner 0\nyllcorner 0\ncellsize 1\n1\n')
+    with (land_cover_dir / 'salas.gdf').open('a') as f:
+        f.write('LA LandCover/LA asc\n')
+
+    scenario = scenario_with_input(model_root / 'salas_issues.in')
+
+    # Simulate the GDAL sidecar that visualization generation leaves in the stored collection
+    lugrid_dataset = db_session.query(Dataset).get(scenario.input_file.get_value('LUGRID').resource_id)
+    stored_dir = Path(lugrid_dataset.file_collection_client.path)
+    assert (stored_dir / 'LA.asc').is_file()
+    (stored_dir / 'LA.asc.aux.xml').write_text('<PAMDataset/>')
+
+    out_dir = tmp_path / 'out'
+    scenario.export(out_dir)
+
+    # STARTDATE in salas_issues.in is 06/01/2004/00
+    exported = sorted(p.name for p in (out_dir / 'LandCover').iterdir())
+    assert 'LA0601200400.asc' in exported
+    assert 'LA.asc' not in exported
+    assert not any(name.endswith('.aux.xml') for name in exported)
+
+    # The .gdf in the export has the folder prepended to the grid entry, other entries untouched
+    gdf_lines = (out_dir / 'LandCover' / 'salas.gdf').read_text().splitlines()
+    assert 'AL LandCover/salas lal' in gdf_lines
+    asc_lines = [line for line in gdf_lines if line.endswith('asc')]
+    assert len(asc_lines) == 1
+    assert asc_lines[0].startswith('LA LandCover/')
+
+    # The stored collection is untouched
+    stored = sorted(p.name for p in stored_dir.iterdir())
+    assert 'LA.asc' in stored
+    assert 'LA.asc.aux.xml' in stored
+    assert 'LA0601200400.asc' not in stored
+
+    for dataset in scenario.get_linked(of_type=Dataset):
+        db_session.delete(dataset)
+    db_session.delete(scenario)
+    db_session.commit()
+
+
+@pytest.mark.filterwarnings('ignore::UserWarning')
+def test_scenario_export_creates_missing_directory(scenario_with_input, files_dir, tmp_path):
     input_file_path = files_dir / 'models' / 'salas' / 'salas.in'
 
     scenario = scenario_with_input(input_file_path)
 
-    with pytest.raises(ValueError):
-        scenario.export(tmp_path / 'out' / 'dne')
+    out_dir = tmp_path / 'out' / 'dne'
+    assert not out_dir.exists()
+
+    scenario.export(out_dir, with_datasets=False)
+
+    assert out_dir.is_dir()
+    assert (out_dir / 'salas.in').is_file()
+
+
+@pytest.mark.filterwarnings('ignore::UserWarning')
+def test_scenario_export_directory_is_file(scenario_with_input, files_dir, tmp_path):
+    input_file_path = files_dir / 'models' / 'salas' / 'salas.in'
+
+    scenario = scenario_with_input(input_file_path)
+
+    not_a_dir = tmp_path / 'out.txt'
+    not_a_dir.write_text('not a directory')
+
+    with pytest.raises(FileExistsError):
+        scenario.export(not_a_dir)
 
 
 def test_scenario_serialize(complete_project):

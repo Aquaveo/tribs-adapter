@@ -233,6 +233,13 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
         self.input_file = tribs_input
         session.commit()
 
+        if not self.linked_datasets:
+            log.warning(
+                f'No output datasets were created for Realization "{self.name}" ({self.id}) from model_root '
+                f'"{model_root}". Verify that the output file paths in the Scenario input file exist relative to '
+                f'the model root.'
+            )
+
         # Generate visualization if spatial_manager is given
         if spatial_manager is not None:
             for dataset in self.linked_datasets:
@@ -242,6 +249,37 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
                     log.exception(
                         f'Failed to generate visualization for Dataset named "{dataset.name}" ({dataset.id}).'
                     )
+
+    def export(self, directory: Path | str, with_datasets: bool = True):
+        """Export the input file, input datasets, and output datasets for this Realization.
+
+        Args:
+            directory: Directory to export the input file and input files to.
+        """
+        from .dataset import Dataset
+
+        dir_path = Path(directory)
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Export the input file
+        self.input_file.to_input_file(dir_path)
+
+        if not with_datasets:
+            return
+
+        # Export input datasets
+        self.scenario._export_input_datasets(self.input_file, dir_path)
+
+        # Export output datasets
+        session = object_session(self)
+        for _card, field in self.input_file.files(mode=self.input_file.FilesMode.OUTPUT_ONLY):
+            for fdp in field.file_database_paths:
+                if not fdp.resource_id:
+                    continue
+
+                dataset = session.query(Dataset).get(fdp.resource_id)
+                if dataset is not None:
+                    dataset.export(dir_path / Path(field.path).parent)
 
     def serialize_custom_fields(self, d: dict):
         """Hook for app-specific subclasses to add additional fields to serialization.

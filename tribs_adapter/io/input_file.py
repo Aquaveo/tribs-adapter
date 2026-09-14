@@ -546,7 +546,8 @@ class tRIBSInput(BaseModel):
 
         # Handle files listed in SDF and GDF files
         if card in self.xdf_cards and len(existing_file_paths) >= 1:
-            for f in existing_file_paths:
+            # Iterate over a copy: the nested files must not be parsed as SDF/GDF files themselves
+            for f in list(existing_file_paths):
                 existing_file_paths.extend(self.paths_from_xdf(model_root, f))
 
         # Handle group by file extension
