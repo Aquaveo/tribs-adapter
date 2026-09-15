@@ -4,8 +4,7 @@ channels:
 - conda-forge
 
 dependencies:
-- python=3.14
-- python-gil  # force standard (non free-threaded) build so pdm.lock cp314 wheels apply
+- python=3.13
 - cxx-compiler
 - git
 - gdal
@@ -24,8 +23,8 @@ dependencies:
 - param
 - pyshp
 - requests
-# sqlalchemy<2 has no py3.14 conda-forge build; pdm installs it from PyPI
-# tethys_dataset_services requires sqlalchemy<2 in conda; pdm installs both from PyPI
+- sqlalchemy<2
+- tethys_dataset_services>=2.4.1
 - panel
 # TETHYS dependencies
 - plotly
