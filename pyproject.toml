@@ -28,9 +28,10 @@ dependencies = [
     "pillow>=11.0.0",
     "tethys-dataset-services>=2.4.1",
     "pygeoutils",
-    "xmstool-tribs"
+    "xmstool-tribs",
+    "xmsconstraint==6.0.11"
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 readme = "README.md"
 license = { text = "MIT" }
 
@@ -51,6 +52,7 @@ prepare_parallelization = "tribs_adapter.workflows.prepare_parallelization:Prepa
 
 [tool.pdm.resolution.overrides]
 earthaccess = ">=0.14.0,<0.15.0"
+xmsconstraint = "==6.0.11"
 
 [tool.pdm.dev-dependencies]
 test = [
