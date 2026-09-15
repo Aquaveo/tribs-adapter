@@ -9,11 +9,11 @@ dependencies = [
     "sqlalchemy<2",
     "geoalchemy2>=0.14.1",
     "pandas>=2.2.2",
-    "psycopg2>=2.9.7",
+    "psycopg2-binary>=2.9.7",
     "pygltflib>=1.16.0",
     "pyproj>=3.6.1",
     "StrEnum>=0.4.15",
-    "pytRIBS @ git+https://github.com/tribshms/pytRIBS.git@main",
+    "pytRIBS @ git+https://github.com/tribshms/pytRIBS.git@v0.7.4",
     "pytz>=2023.3",
     "xarray>=2023.1.0",
     "geoserver-restconfig==2.0.9",
@@ -28,7 +28,8 @@ dependencies = [
     "pillow>=11.0.0",
     "tethys-dataset-services>=2.4.1",
     "pygeoutils",
-    "xmstool-tribs"
+    "xmstool-tribs",
+    "xmsconstraint==6.0.11"
 ]
 requires-python = ">=3.13"
 readme = "README.md"
@@ -51,6 +52,7 @@ prepare_parallelization = "tribs_adapter.workflows.prepare_parallelization:Prepa
 
 [tool.pdm.resolution.overrides]
 earthaccess = ">=0.14.0,<0.15.0"
+xmsconstraint = "==6.0.11"
 
 [tool.pdm.dev-dependencies]
 test = [
