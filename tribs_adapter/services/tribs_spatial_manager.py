@@ -797,11 +797,15 @@ class TribsSpatialManager(ResourceSpatialManager):
             output_collection_path = output_dataset.file_collection_client.path
             output_files = [
                 os.path.join(output_collection_path, f) for f in os.listdir(output_collection_path)
-                if not f.endswith('.json') and os.path.isfile(os.path.join(output_collection_path, f))
+                if self._is_tribs_variable_output_file(os.path.join(output_collection_path, f))
             ]
 
+        # Find the tRIBS Voronoi polygon file (_voi) that goes with the mesh, if there is one. Output variables are
+        # rendered on the Voronoi cells, which are computed from the TIN when no _voi file is available.
+        voi_file = self._find_voi_file(mesh_file, output_collection_path)
+
         # Create the gltf
-        tribs_mesh = tRIBSMeshViz(mesh_file, mesh_epsg=mesh_epsg, output_files=output_files)
+        tribs_mesh = tRIBSMeshViz(mesh_file, mesh_epsg=mesh_epsg, output_files=output_files, voi_file=voi_file)
         meta = tribs_mesh.to_gltf(
             gltf_out_path, to_epsg=mesh_epsg, output_variables=output_variables, generate_legend=True
         )
@@ -820,6 +824,38 @@ class TribsSpatialManager(ResourceSpatialManager):
         # Add the gltf to the dataset
         dataset_to_add_to.file_collection_client.add_item(gltf_path)
         return meta
+
+    @staticmethod
+    def _is_tribs_variable_output_file(path):
+        """Whether the given file is a tRIBS spatial variable output file (_00d/_00i) rather than a companion file."""
+        if not os.path.isfile(path):
+            return False
+        name = os.path.basename(path)
+        return not name.endswith(('.json', '.gltf', '.png', '_voi', '_area', '_reach', '_width'))
+
+    @staticmethod
+    def _find_voi_file(mesh_file, output_collection_path=None):
+        """Find the tRIBS Voronoi polygon file (_voi) for a mesh.
+
+        Looks next to the mesh files first (``<mesh_file>_voi``), then for any ``*_voi`` file in the output dataset
+        collection (tRIBS writes the _voi file with the spatial output files).
+
+        Args:
+            mesh_file(str): Basename path of the mesh files (path without extension).
+            output_collection_path(str): Path of the output dataset file collection, if any.
+
+        Returns:
+            str: Path to the _voi file or None if none was found.
+        """
+        candidates = [f'{mesh_file}_voi']
+        if output_collection_path is not None:
+            candidates.extend(sorted(glob.glob(os.path.join(glob.escape(output_collection_path), '*_voi'))))
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                log.info(f'Using Voronoi polygon file: {candidate}')
+                return candidate
+        log.info(f'No Voronoi polygon (_voi) file found for mesh {mesh_file}.')
+        return None
 
     def create_tribs_czml_layer(self, dataset, session, files, srid):
         """
