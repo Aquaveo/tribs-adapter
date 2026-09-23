@@ -2,7 +2,9 @@ from tribs_adapter.common.dataset_types import DatasetTypes
 
 expected_file_fields_salas = {
     "OUTFILENAME": {
-        'fdps': [['salas.0000_00d', 'salas.0010_00d', 'salas.0700_00d'], ['salas.0000_00i', 'salas.0700_00i'],
+        # The Voronoi polygon file (_voi) is kept with the spatial variable output datasets (_00d and _00i)
+        'fdps': [['salas.0000_00d', 'salas.0010_00d', 'salas.0700_00d', 'salas_voi'],
+                 ['salas.0000_00i', 'salas.0700_00i', 'salas_voi'],
                  ['salas0.pixel']],
         'path': 'Output/voronoi/salas',
     },
@@ -52,7 +54,8 @@ expected_datasets_salas = [
 
 expected_file_fields_examplebasin = {
     "OUTFILENAME": {
-        'fdps': [['examplebasin.0010_00d', 'examplebasin.0000_00d'], ['examplebasin.0000_00i', 'examplebasin.0010_00i'],
+        'fdps': [['examplebasin.0010_00d', 'examplebasin.0000_00d', 'examplebasin_voi'],
+                 ['examplebasin.0000_00i', 'examplebasin.0010_00i', 'examplebasin_voi'],
                  ['examplebasin948.pixel', 'examplebasin72.pixel', 'examplebasin1156.pixel']],
         'path': 'Output/Fall1996/voronoi/examplebasin',
     },

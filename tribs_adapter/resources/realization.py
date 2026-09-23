@@ -22,6 +22,9 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
 
     UPLOAD_STATUS_KEY = 'upload'
 
+    # Output file extensions whose datasets hold per-Voronoi-cell variables (and therefore get the _voi file too)
+    VORONOI_OUTPUT_EXTENSIONS = ('_00d', '_00i')
+
     __mapper_args__ = {
         'polymorphic_identity': TYPE,
     }
@@ -186,6 +189,14 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
         for card, field in tribs_input.files(mode=tribs_input.FilesMode.OUTPUT_ONLY):
             # Get paths for the card
             existing_file_paths = tribs_input.expand_paths(card, model_root)
+
+            # tRIBS writes the Voronoi polygon file (<OUTFILENAME>_voi) alongside the spatial variable output.
+            # Keep it with the spatial output datasets: it is used to render the variables on the Voronoi cells.
+            voi_path = Path(model_root) / f'{tribs_input.get_value(card).path}_voi'
+            if voi_path.is_file():
+                for ext in self.VORONOI_OUTPUT_EXTENSIONS:
+                    if existing_file_paths.get(ext) and voi_path not in existing_file_paths[ext]:
+                        existing_file_paths[ext].append(voi_path)
 
             # NOTE: Both output cards expect existing_file_paths to be a dictionary of file paths so assuming that here
             # Create a dataset for each
