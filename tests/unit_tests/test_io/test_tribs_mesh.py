@@ -584,11 +584,14 @@ def test_voronoi_cells_clipped_to_mesh(tmp_path):
     ]
     triangles = [(0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1)]
     base = _write_mesh(tmp_path, 'fan', nodes, triangles)
-    tmv = tRIBSMeshViz(base, 32613)
 
-    # Unclipped cell reaches far outside
-    _, raw = tmv.compute_voronoi_from_tin()
-    assert raw[0][:, 1].min() < -1000
+    # Without clipping the cell reaches far outside the mesh
+    unclipped = tRIBSMeshViz(base, 32613, clip_cells_to_mesh=False)
+    assert unclipped.voronoi['polygons'][0][:, 1].min() < -1000
+
+    # Clipping is on by default
+    tmv = tRIBSMeshViz(base, 32613)
+    assert tmv.clip_cells_to_mesh is True
 
     # Clipped cell stays within the mesh footprint (y >= -1 along the flat bottom edge)
     ids, polygons = tmv.voronoi['ids'], tmv.voronoi['polygons']
