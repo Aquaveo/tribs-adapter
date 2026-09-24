@@ -41,3 +41,14 @@ def test_find_voi_file(tmp_path):
     mesh_voi = _touch(mesh_dir / 'salas_voi')
     assert TribsSpatialManager._find_voi_file(mesh_file, str(output_dir)) == mesh_voi
     assert TribsSpatialManager._find_voi_file(mesh_file) == mesh_voi
+
+
+def test_parse_cluster_ports():
+    parse = TribsSpatialManager._parse_cluster_ports
+    assert parse('[8080]') == [8080]
+    assert parse('[8081, 8082]') == [8081, 8082]
+    assert parse('"[8080]"') == [8080]  # extra level of quoting left by an env loader
+    assert parse('8080') == [8080]
+    assert parse(None) == [8081, 8082, 8083, 8084]
+    assert parse('not json') == [8081, 8082, 8083, 8084]
+    assert parse('["a"]') == [8081, 8082, 8083, 8084]
