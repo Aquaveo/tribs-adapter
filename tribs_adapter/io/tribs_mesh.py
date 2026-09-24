@@ -54,6 +54,7 @@ class tRIBSMeshViz:
         output_files: list[Path | str] = None,
         voi_file: Path | str = None,
         voronoi_cells: bool = True,
+        clip_cells_to_mesh: bool = True,
     ) -> None:
         """Initialize tRIBSMeshViz object.
 
@@ -65,6 +66,10 @@ class tRIBSMeshViz:
             voi_file: Path to the tRIBS ``*_voi`` Voronoi polygon file. Defaults to ``<mesh_basename>_voi`` if that
                 file exists. When no file is available the Voronoi cells are computed from the TIN.
             voronoi_cells: Render on the Voronoi cells (True, default) instead of on the TIN vertices.
+            clip_cells_to_mesh: Clip the Voronoi cells to the footprint of the TIN (default True). Cells at the
+                mesh boundary can extend far outside the mesh because their vertices are circumcenters of flat
+                boundary triangles; clipping removes those spikes from the rendering only, the mesh and _voi files
+                are never modified. Set False to render the cells exactly as tRIBS defines them.
         """
         if output_files is None:
             output_files = []
@@ -78,6 +83,7 @@ class tRIBSMeshViz:
         self._data = None  # Lazily loaded by the ``data`` property
         self.normals = None
         self.voronoi_cells = voronoi_cells
+        self.clip_cells_to_mesh = clip_cells_to_mesh
         self.voi_file = self._resolve_voi_file(voi_file)
         self._voronoi = None  # Lazily loaded by the ``voronoi`` property
         self._voronoi_geometry = None  # Lazily built by ``_build_voronoi_geometry``
@@ -133,7 +139,8 @@ class tRIBSMeshViz:
                     f"No _voi file found for mesh {self.mesh_basename}. Computing Voronoi cells from the TIN instead."
                 )
                 ids, polygons = self.compute_voronoi_from_tin()
-            ids, polygons = self._clip_cells_to_mesh(ids, polygons)
+            if self.clip_cells_to_mesh:
+                ids, polygons = self._clip_cells_to_mesh(ids, polygons)
             self._voronoi = {'ids': ids, 'polygons': polygons}
             log.info(f"Loaded {len(ids)} Voronoi cells.")
         return self._voronoi
@@ -160,10 +167,10 @@ class tRIBSMeshViz:
     def _clip_cells_to_mesh(self, ids: np.ndarray, polygons: list[np.ndarray]) -> tuple[np.ndarray, list[np.ndarray]]:
         """Clip Voronoi cells to the footprint of the TIN.
 
-        Voronoi vertices are triangle circumcenters, and the circumcenter of a very flat triangle at the mesh
-        boundary can lie far outside the mesh (hundreds of meters for a 10 m cell). tRIBS itself clips such cells
-        when it computes their areas but writes the raw vertices to the _voi file, so both the file and the cells
-        computed here need clipping before rendering, or the cells show up as long spikes beyond the basin.
+        Enabled by default (``clip_cells_to_mesh``). Voronoi vertices are triangle circumcenters, and the
+        circumcenter of a very flat triangle at the mesh boundary can lie far outside the mesh (hundreds of meters
+        for a 10 m cell). tRIBS itself clips such cells when it computes their areas but writes the raw vertices to
+        the _voi file, so without clipping such cells show up as long spikes beyond the basin in the rendering.
 
         Cells entirely inside the mesh are returned unchanged. Cells that reach outside are intersected with the
         mesh footprint; if that leaves several pieces the one containing the cell's node is kept. Cells that vanish
@@ -1332,7 +1339,8 @@ def separator() -> None:
 
 def main(args):  # pragma: no cover
     tribs_mesh = tRIBSMeshViz(
-        args.mesh, args.srid, args.output_files, voi_file=args.voi, voronoi_cells=not args.tin
+        args.mesh, args.srid, args.output_files, voi_file=args.voi, voronoi_cells=not args.tin,
+        clip_cells_to_mesh=not args.no_clip,
     )
     tribs_mesh.to_gltf(args.gltf, output_variables=args.variables, generate_legend=args.legend)
 
@@ -1352,6 +1360,10 @@ def parse_args():  # pragma: no cover
         '-v', '--variables', nargs='*', default=None, help='Output variables to visualize (default: all).'
     )
     parser.add_argument('--legend', default=False, action='store_true', help='Also write legend images.')
+    parser.add_argument(
+        '--no-clip', default=False, action='store_true',
+        help='Do not clip Voronoi cells to the mesh footprint (keeps the spikes flat boundary triangles produce).'
+    )
     parser.add_argument('output_files', nargs='*', help='Output files (_00d/_00i) to read and visualize.')
     return parser.parse_args()
 
