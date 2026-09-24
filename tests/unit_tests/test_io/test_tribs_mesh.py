@@ -56,7 +56,7 @@ def test_tRIBSMeshViz_to_gltf_no_normals(tmv_factory, files_dir, mesh_basename, 
     temp_dir = tempfile.mkdtemp()
     gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
     gltf_file = f'{gltf_file_base_name}.gltf'
-    tmv.to_gltf(gltf_file_base_name, mesh_epsg, color_ramp_file=color_ramp_file)
+    tmv.to_gltf(gltf_file_base_name, mesh_epsg, color_ramp_file=color_ramp_file, binary=False)
     assert os.path.exists(gltf_file)
     assert_gltf_equal(gltf_file, get_expected_gltf(mesh_basename))
 
@@ -74,7 +74,7 @@ def test_tRIBSMeshViz_to_gltf_normals(tmv_factory, files_dir, mesh_basename, get
     temp_dir = tempfile.mkdtemp()
     gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
     gltf_file = f'{gltf_file_base_name}.gltf'
-    tmv.to_gltf(gltf_file_base_name, mesh_epsg, color_ramp_file=color_ramp_file)
+    tmv.to_gltf(gltf_file_base_name, mesh_epsg, color_ramp_file=color_ramp_file, binary=False)
 
     expected_data = {}
 
@@ -119,7 +119,7 @@ def test_output_files(tmv_factory):
     gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
     tm.to_gltf(gltf_file_base_name, mesh_epsg, output_variables=['Z'])
 
-    gltf_z_file = f'{gltf_file_base_name}_salas-0700_00d_Z.gltf'
+    gltf_z_file = f'{gltf_file_base_name}_salas-0700_00d_Z.glb'
     assert os.path.exists(gltf_z_file)
     assert len(os.listdir(temp_dir)) == 1
 
@@ -134,31 +134,31 @@ def test_output_files(tmv_factory):
 
     tm.to_gltf(gltf3_file_base_name)
     assert len(os.listdir(temp_dir_3)) == 25
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_EvpSoil.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_ID.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Nt.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Rain.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Z.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_ActEvp.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_FlwVlc.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_LFlux.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Nwt.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_RootMoist.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_CAr.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_GFlux.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Mi.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Qpin.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_S.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_CanStorg.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_HFlux.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Mu.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Qpout.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_SoilMoist.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_ET.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Hlev.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Nf.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Qstrm.gltf")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Srf.gltf")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_EvpSoil.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_ID.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Nt.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Rain.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Z.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_ActEvp.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_FlwVlc.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_LFlux.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Nwt.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_RootMoist.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_CAr.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_GFlux.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Mi.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Qpin.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_S.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_CanStorg.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_HFlux.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Mu.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Qpout.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_SoilMoist.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_ET.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Hlev.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Nf.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Qstrm.glb")
+    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Srf.glb")
 
 
 def test_given_color_ramp_file(tmv_factory, files_dir, get_expected_gltf, assert_gltf_equal):
@@ -175,7 +175,7 @@ def test_given_color_ramp_file(tmv_factory, files_dir, get_expected_gltf, assert
         files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'PinkToYellow.png'
     )
 
-    tmv.to_gltf(gltf_file_base_name, output_variables=['Z'], color_ramp_file=color_ramp_file)
+    tmv.to_gltf(gltf_file_base_name, output_variables=['Z'], color_ramp_file=color_ramp_file, binary=False)
 
     assert os.path.exists(gltf_file)
     expected = get_expected_gltf(mesh_basename)
@@ -224,22 +224,23 @@ def test_reassign_bad_z_values(tmv_factory, caplog):
 # Voronoi cells
 # ----------------------------------------------------------------------------------------------------------------------
 def _read_gltf_accessors(gltf_file):
-    """Decode the indices, positions and texture coordinates of a glTF written by tRIBSMeshViz."""
-    import base64
-    import json
+    """Decode indices, positions, normals and texture coordinates of a glTF (.glb or .gltf) from tRIBSMeshViz."""
+    import pygltflib
 
-    with open(gltf_file) as f:
-        gltf = json.load(f)
-    buffer = base64.b64decode(gltf['buffers'][0]['uri'].split(',', 1)[1])
+    gltf = pygltflib.GLTF2().load(str(gltf_file))
+    if str(gltf_file).endswith('.glb'):
+        buffer = gltf.binary_blob()
+    else:
+        buffer = gltf.get_data_from_buffer_uri(gltf.buffers[0].uri)
     dtypes = {5125: np.uint32, 5126: np.float32}
     counts = {'SCALAR': 1, 'VEC2': 2, 'VEC3': 3}
 
     def accessor(index):
-        acc = gltf['accessors'][index]
-        view = gltf['bufferViews'][acc['bufferView']]
-        n = counts[acc['type']]
+        acc = gltf.accessors[index]
+        view = gltf.bufferViews[acc.bufferView]
+        n = counts[acc.type]
         data = np.frombuffer(
-            buffer, dtype=dtypes[acc['componentType']], count=acc['count'] * n, offset=view.get('byteOffset', 0)
+            buffer, dtype=dtypes[acc.componentType], count=acc.count * n, offset=(view.byteOffset or 0)
         )
         return data.reshape(-1, n) if n > 1 else data
 
@@ -359,7 +360,7 @@ def test_voronoi_gltf_values_join_by_id(tmv_factory):
     gltf_file_base_name = os.path.join(temp_dir, mesh_basename)
     tmv.to_gltf(gltf_file_base_name, '32613', output_variables=['ID'], generate_legend=True)
 
-    gltf_file = f'{gltf_file_base_name}_salas-0700_00d_ID.gltf'
+    gltf_file = f'{gltf_file_base_name}_salas-0700_00d_ID.glb'
     assert os.path.exists(gltf_file)
     assert os.path.exists(f'{gltf_file_base_name}_salas-0700_00d_ID_legend.png')
 
@@ -401,7 +402,7 @@ def test_voronoi_gltf_missing_values_are_transparent(tmv_factory, gltf_dir):
     gltf_file_base_name = os.path.join(temp_dir, mesh_basename)
     tmv.to_gltf(gltf_file_base_name, '32613', output_variables=['Foo'])
 
-    _, _, _, texcoords = _read_gltf_accessors(f'{gltf_file_base_name}_partial-0000_00d_Foo.gltf')
+    _, _, _, texcoords = _read_gltf_accessors(f'{gltf_file_base_name}_partial-0000_00d_Foo.glb')
     geometry = tmv._build_voronoi_geometry()
     cell_uv = texcoords[np.r_[0, np.cumsum(np.bincount(geometry['vertex_cell']))[:-1]]]
     np.testing.assert_allclose(cell_uv[0], [0.0, 1.0])  # Node 0 -> 20 (max)
@@ -420,7 +421,7 @@ def test_voronoi_cells_disabled_renders_tin(tmv_factory):
     gltf_file_base_name = os.path.join(temp_dir, mesh_basename)
     tmv_tin.to_gltf(gltf_file_base_name, '32613', output_variables=['Z'])
 
-    triangles, positions, _, _ = _read_gltf_accessors(f'{gltf_file_base_name}_salas-0700_00d_Z.gltf')
+    triangles, positions, _, _ = _read_gltf_accessors(f'{gltf_file_base_name}_salas-0700_00d_Z.glb')
     assert len(positions) == len(tmv_tin.nodes)
     np.testing.assert_array_equal(triangles, tmv_tin.triangles)
 
@@ -490,3 +491,36 @@ def test_tin_surface_elevations_outside_tin(tmv_factory):
     # Identical points always get identical elevations
     z2 = tmv._tin_surface_elevations(np.vstack([far_east, far_east]), np.array([node, node]))
     assert z2[0] == z2[1] == z
+
+
+def test_glb_output(tmv_factory, files_dir):
+    """Binary glTF is the default: one .glb per variable with the color ramp stored in the binary buffer."""
+    import pygltflib
+
+    mesh_basename = 'salas_outputs'
+    tmv = tmv_factory(mesh_basename, '32613', output_files=['salas.0700_00d'])
+    temp_dir = tempfile.mkdtemp()
+    base = os.path.join(temp_dir, mesh_basename)
+    tmv.to_gltf(base, '32613', output_variables=['S'], generate_legend=True)
+    tmv.to_gltf(base, '32613', output_variables=['S'], binary=False)
+    glb_file = f'{base}_salas-0700_00d_S.glb'
+    gltf_file = f'{base}_salas-0700_00d_S.gltf'
+    assert os.path.exists(glb_file) and os.path.exists(gltf_file)
+    assert os.path.exists(f'{base}_salas-0700_00d_S_legend.png')
+
+    with open(glb_file, 'rb') as f:
+        assert f.read(4) == b'glTF'
+    glb = pygltflib.GLTF2().load(glb_file)
+    assert glb.buffers[0].uri is None
+    assert glb.images[0].uri is None and glb.images[0].mimeType == 'image/png'
+    image_view = glb.bufferViews[glb.images[0].bufferView]
+    assert image_view.byteOffset % 4 == 0
+    with open(os.path.join(files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'TopoAtlasShader.png'),
+              'rb') as f:
+        ramp = f.read()
+    assert glb.binary_blob()[image_view.byteOffset:image_view.byteOffset + image_view.byteLength] == ramp
+    assert glb.buffers[0].byteLength == len(glb.binary_blob())
+    # The .glb is smaller than the base64 .gltf, and carries the same geometry and values
+    assert os.path.getsize(glb_file) < 0.8 * os.path.getsize(gltf_file)
+    for a, b in zip(_read_gltf_accessors(glb_file), _read_gltf_accessors(gltf_file)):
+        np.testing.assert_array_equal(a, b)
