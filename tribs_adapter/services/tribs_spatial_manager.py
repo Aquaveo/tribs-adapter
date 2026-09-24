@@ -95,10 +95,26 @@ class TribsSpatialManager(ResourceSpatialManager):
     }
 
     # Override parent class GEOSERVER_CLUSTER_PORTS attribute with local environment var
-    try:
-        GEOSERVER_CLUSTER_PORTS = json.loads(os.environ.get("GEOSERVER_CLUSTER_PORTS"))
-    except (json.JSONDecodeError, TypeError):
-        GEOSERVER_CLUSTER_PORTS = [8081, 8082, 8083, 8084]
+    @staticmethod
+    def _parse_cluster_ports(value, default=(8081, 8082, 8083, 8084)):
+        """Parse the GEOSERVER_CLUSTER_PORTS environment value (a JSON list of ints, e.g. "[8080]").
+
+        Tolerates a single port ("8080") and an extra level of quoting ('"[8080]"') that some env loaders leave in
+        place; anything else falls back to the default ports.
+        """
+        try:
+            ports = json.loads(value)
+            if isinstance(ports, str):  # e.g. '"[8080]"' -> '[8080]'
+                ports = json.loads(ports)
+            if isinstance(ports, int):
+                ports = [ports]
+            ports = [int(p) for p in ports]
+        except (json.JSONDecodeError, TypeError, ValueError):
+            log.warning(f'Invalid GEOSERVER_CLUSTER_PORTS value {value!r}. Using default ports {list(default)}.')
+            return list(default)
+        return ports
+
+    GEOSERVER_CLUSTER_PORTS = _parse_cluster_ports(os.environ.get("GEOSERVER_CLUSTER_PORTS"))
     log.debug(f"GEOSERVER_CLUSTER_PORTS set to {GEOSERVER_CLUSTER_PORTS}")
 
     def __init__(self, geoserver_engine, reload_ports=GEOSERVER_CLUSTER_PORTS):
