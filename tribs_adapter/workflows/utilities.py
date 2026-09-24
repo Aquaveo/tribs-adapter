@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -148,6 +149,37 @@ def get_tribspar_executable_path():
     return tribs_executable
 
 
+def get_mpi_launcher():
+    """Locate ``mpirun`` and build the environment to launch the parallel tRIBS binary with.
+
+    Condor jobs run with a minimal environment (often without a usable PATH), so ``mpirun`` is looked up on the PATH
+    first and then next to the Python interpreter running the job (an MPI runtime installed in the same conda
+    environment). The ``lib`` directory of that runtime is added to ``LD_LIBRARY_PATH`` so that tRIBSpar, which is
+    dynamically linked against ``libmpi.so.40`` and ``libmpi_cxx.so.40`` without an rpath, can find the libraries.
+
+    Returns:
+        Tuple of the path to ``mpirun`` and the environment dictionary for the subprocess.
+
+    Raises:
+        FileNotFoundError: If no ``mpirun`` can be found.
+    """
+    env = os.environ.copy()
+    mpirun = shutil.which('mpirun')
+    if mpirun is None:
+        candidate = Path(sys.executable).resolve().parent / 'mpirun'
+        if candidate.exists():
+            mpirun = str(candidate)
+    if mpirun is None:
+        raise FileNotFoundError(
+            'mpirun was not found on the PATH or next to the Python interpreter. An MPI runtime (OpenMPI 4) is '
+            'required to run tRIBSpar.'
+        )
+    lib_dir = Path(mpirun).resolve().parent.parent / 'lib'
+    if lib_dir.is_dir():
+        env['LD_LIBRARY_PATH'] = os.pathsep.join(p for p in [str(lib_dir), env.get('LD_LIBRARY_PATH')] if p)
+    return mpirun, env
+
+
 def run_tribs(project_dir, project_file, tribs_executable=None, silent=False):
     """
     Executes tRIBS synchronously on a separate process.
@@ -162,13 +194,15 @@ def run_tribs(project_dir, project_file, tribs_executable=None, silent=False):
     if tribs_executable is None:
         tribs_executable = get_tribspar_executable_path()
 
+    mpirun, mpi_env = get_mpi_launcher()
+
     # Command and arguments
     # TODO should I add the num of processor here?
-    tribs_command = ['mpirun', os.path.join(project_dir, str(tribs_executable)), project_file]
+    tribs_command = [mpirun, os.path.join(project_dir, str(tribs_executable)), project_file]
 
     # Run tRIBS
     print(f'\nRunning tRIBS:\n\tWith command:  {tribs_command}\n')
-    p = subprocess.run(tribs_command, capture_output=True, universal_newlines=True, cwd=project_dir)
+    p = subprocess.run(tribs_command, capture_output=True, universal_newlines=True, cwd=project_dir, env=mpi_env)
 
     if not silent:
         try:
