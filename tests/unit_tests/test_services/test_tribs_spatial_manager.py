@@ -13,7 +13,9 @@ def test_is_tribs_variable_output_file(tmp_path):
     assert TribsSpatialManager._is_tribs_variable_output_file(_touch(tmp_path / 'salas.0000_00d'))
     assert TribsSpatialManager._is_tribs_variable_output_file(_touch(tmp_path / 'salas.0700_00i'))
     # Companion files that are not spatial variable output
-    for name in ['__meta__.json', 'salas_voi', 'salas_area', 'salas_reach', 'salas_width', 'x.gltf', 'x_legend.png']:
+    companions = ['__meta__.json', 'salas_voi', 'salas_area', 'salas_reach', 'salas_width',
+                  'x.gltf', 'x.glb', 'x_legend.png']
+    for name in companions:
         assert not TribsSpatialManager._is_tribs_variable_output_file(_touch(tmp_path / name)), name
     # Directories
     os.mkdir(tmp_path / 'gltf')
