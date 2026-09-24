@@ -133,9 +133,75 @@ class tRIBSMeshViz:
                     f"No _voi file found for mesh {self.mesh_basename}. Computing Voronoi cells from the TIN instead."
                 )
                 ids, polygons = self.compute_voronoi_from_tin()
+            ids, polygons = self._clip_cells_to_mesh(ids, polygons)
             self._voronoi = {'ids': ids, 'polygons': polygons}
             log.info(f"Loaded {len(ids)} Voronoi cells.")
         return self._voronoi
+
+    @property
+    def mesh_domain(self) -> shapely.Geometry:
+        """Footprint of the TIN (union of its triangles) as a shapely polygon or multipolygon."""
+        if self._mesh_domain is None:
+            xy = self.nodes[:, :2].astype(np.float64)
+            corners = xy[self.triangles]
+            signed_area = 0.5 * (
+                (corners[:, 1, 0] - corners[:, 0, 0]) * (corners[:, 2, 1] - corners[:, 0, 1])
+                - (corners[:, 2, 0] - corners[:, 0, 0]) * (corners[:, 1, 1] - corners[:, 0, 1])
+            )
+            triangles = shapely.polygons(corners[np.abs(signed_area) > 1e-9])
+            try:
+                # Fast exact union for a set of polygons that only share edges (a triangulation)
+                domain = shapely.coverage_union_all(triangles)
+            except shapely.errors.GEOSException:
+                domain = shapely.union_all(triangles)
+            self._mesh_domain = shapely.make_valid(domain)
+        return self._mesh_domain
+
+    def _clip_cells_to_mesh(self, ids: np.ndarray, polygons: list[np.ndarray]) -> tuple[np.ndarray, list[np.ndarray]]:
+        """Clip Voronoi cells to the footprint of the TIN.
+
+        Voronoi vertices are triangle circumcenters, and the circumcenter of a very flat triangle at the mesh
+        boundary can lie far outside the mesh (hundreds of meters for a 10 m cell). tRIBS itself clips such cells
+        when it computes their areas but writes the raw vertices to the _voi file, so both the file and the cells
+        computed here need clipping before rendering, or the cells show up as long spikes beyond the basin.
+
+        Cells entirely inside the mesh are returned unchanged. Cells that reach outside are intersected with the
+        mesh footprint; if that leaves several pieces the one containing the cell's node is kept. Cells that vanish
+        are dropped.
+        """
+        domain = self.mesh_domain
+        shapely.prepare(domain)
+        cells = np.array([shapely.Polygon(ring) for ring in polygons], dtype=object)
+        inside = shapely.contains(domain, cells)
+        if inside.all():
+            return ids, polygons
+
+        nodes_xy = self.nodes[:, :2].astype(np.float64)
+        kept_ids, kept_polygons, clipped, dropped = [], [], 0, 0
+        for node_index, ring, cell, is_inside in zip(ids, polygons, cells, inside):
+            if is_inside:
+                kept_ids.append(node_index)
+                kept_polygons.append(ring)
+                continue
+            piece = shapely.make_valid(cell).intersection(domain)
+            parts = [g for g in getattr(piece, 'geoms', [piece]) if isinstance(g, shapely.Polygon) and not g.is_empty]
+            if len(parts) > 1:
+                node_point = shapely.Point(nodes_xy[node_index])
+                containing = [g for g in parts if g.covers(node_point)]
+                parts = containing if containing else [max(parts, key=lambda g: g.area)]
+            new_ring = self._clean_ring(np.asarray(parts[0].exterior.coords)[:-1]) if parts else None
+            if new_ring is None:
+                dropped += 1
+                continue
+            clipped += 1
+            kept_ids.append(node_index)
+            kept_polygons.append(new_ring)
+
+        log.info(
+            f"Clipped {clipped} Voronoi cells to the mesh footprint"
+            + (f" and dropped {dropped} cells that lie outside of it" if dropped else "") + "."
+        )
+        return np.array(kept_ids, dtype=np.int64), kept_polygons
 
     def _resolve_voi_file(self, voi_file: Path | str = None) -> Path | None:
         """Determine which _voi file to use, if any."""
