@@ -44,6 +44,8 @@ class TribsSpatialManager(ResourceSpatialManager):
     WORKSPACE = 'tribs'
     URI = 'http://portal.aquaveo.com/tribs'
     SLD_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates', 'sld_templates')
+    # glTF files written by tRIBSMeshViz: binary (.glb, current) and JSON (.gltf, older datasets)
+    GLTF_EXTENSIONS = (tRIBSMeshViz.GLB_EXTENSION, tRIBSMeshViz.GLTF_EXTENSION)
     S_RASTER = 'raster'  # built-in style in geoserver
     S_RASTER_CONT = 'raster_continuous'
     S_RASTER_DISC = 'raster_discrete'
@@ -273,7 +275,7 @@ class TribsSpatialManager(ResourceSpatialManager):
             gltf_files = os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf'))
             viz_urls = [
                 os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.gltf')
+                for f in gltf_files if f.endswith(self.GLTF_EXTENSIONS)
             ]
             legend_urls = [
                 os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
@@ -305,7 +307,7 @@ class TribsSpatialManager(ResourceSpatialManager):
             gltf_files = os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf'))
             viz_urls = [
                 os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.gltf')
+                for f in gltf_files if f.endswith(self.GLTF_EXTENSIONS)
             ]
             legend_urls = [
                 os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
@@ -831,7 +833,8 @@ class TribsSpatialManager(ResourceSpatialManager):
         if not os.path.isfile(path):
             return False
         name = os.path.basename(path)
-        return not name.endswith(('.json', '.gltf', '.png', '_voi', '_area', '_reach', '_width'))
+        companions = ('.json', '.png', '_voi', '_area', '_reach', '_width') + TribsSpatialManager.GLTF_EXTENSIONS
+        return not name.endswith(companions)
 
     @staticmethod
     def _find_voi_file(mesh_file, output_collection_path=None):

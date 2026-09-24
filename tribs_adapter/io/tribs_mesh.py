@@ -40,6 +40,10 @@ class tRIBSMeshViz:
     # Tolerance (in mesh units, i.e. meters) used to match the node centers in a _voi file with the mesh nodes.
     VOI_CENTER_TOLERANCE = 1.0
 
+    # File extensions of the two glTF flavors that can be written
+    GLB_EXTENSION = '.glb'
+    GLTF_EXTENSION = '.gltf'
+
     def __init__(
         self,
         mesh_basename: Path | str,
@@ -520,22 +524,26 @@ class tRIBSMeshViz:
         output_variables=None,
         color_ramp_file=None,
         generate_legend=False,
+        binary=True,
     ) -> dict:
         """Write mesh to glTF file.
 
         Args:
-            gltf_path: Path to glTF file that will be written (e.g.: /path/to/out).
+            gltf_path: Path to glTF file that will be written, without extension (e.g.: /path/to/out).
             to_epsg: EPSG code of the coordinate system used by the glTF file (e.g. 4326).
             z_offset: Offset to add to z values. Defaults to 0.
             output_variables: List of output variables to visualize. Defaults to None.
             color_ramp_file: Path to color ramp file. Defaults to None.
             generate_legend: Generate a legend for the glTF file. Defaults to False.
+            binary: Write binary glTF (``.glb``, default). If False, write JSON glTF (``.gltf``) with the buffers
+                and the color ramp image embedded as base64 data URIs (about a third larger).
 
         Returns:
             Dictionary with metadata about the generated glTF files.
         """
         self.data  # Ensure data is loaded
         generated_gltfs = []
+        extension = self.GLB_EXTENSION if binary else self.GLTF_EXTENSION
 
         to_epsg = int(to_epsg) if isinstance(to_epsg, str) else to_epsg
 
@@ -574,29 +582,28 @@ class tRIBSMeshViz:
 
         log.debug("Saving glTF file...")
         if len(self.output_files) == 0:
-            gltf, variable_data = self._build_gltf(localized_nodes, color_ramp_file=color_ramp_file)
+            gltf, variable_data = self._build_gltf(localized_nodes, color_ramp_file=color_ramp_file, binary=binary)
             gltf = self._set_materials(gltf)
-            gltf.save(str(f'{gltf_path}.gltf'))
+            gltf_file_path = Path(f'{gltf_path}{extension}')
+            gltf.save(str(gltf_file_path))
             generated_gltfs.append(gltf)
             if generate_legend:
-                if '.gltf' in str(gltf_path):
-                    legend_path = str(gltf_path).replace('.gltf', '_legend.png')
-                else:
-                    legend_path = f'{gltf_path}_legend.png'
+                legend_path = str(gltf_file_path)[:-len(extension)] + '_legend.png'
                 self._generate_legend_for_values(variable_data, legend_path, color_ramp_file)
         else:
             for output_file in self.output_files:  # Get the file basename and clean out special characters
                 basefile_name = os.path.basename(output_file).replace('.', '-')
                 file_variables = output_variables if output_variables is not None else self.data[output_file].keys()
                 for variable in file_variables:
-                    gltf_file_path = Path(f'{gltf_path}_{basefile_name}_{variable}.gltf')
+                    gltf_file_path = Path(f'{gltf_path}_{basefile_name}_{variable}{extension}')
                     if use_voronoi_cells:
                         gltf, variable_data = self._build_voronoi_gltf(
-                            localized_cells, cell_normals, output_file, variable, color_ramp_file=color_ramp_file
+                            localized_cells, cell_normals, output_file, variable, color_ramp_file=color_ramp_file,
+                            binary=binary,
                         )
                     else:
                         gltf, variable_data = self._build_gltf(
-                            localized_nodes, output_file, variable, color_ramp_file=color_ramp_file
+                            localized_nodes, output_file, variable, color_ramp_file=color_ramp_file, binary=binary
                         )
                     if gltf is not None:
                         gltf = self._set_materials(gltf)
@@ -605,7 +612,7 @@ class tRIBSMeshViz:
                         gltf.save(str(gltf_file_path))
                         generated_gltfs.append(gltf)
                         if generate_legend:
-                            legend_path = str(gltf_file_path).replace('.gltf', '_legend.png')
+                            legend_path = str(gltf_file_path)[:-len(extension)] + '_legend.png'
                             self._generate_legend_for_values(variable_data, legend_path, color_ramp_file)
 
         separator()
@@ -884,6 +891,7 @@ class tRIBSMeshViz:
         output_file: Path | str = None,
         output_variable: str = None,
         color_ramp_file: Path | str = None,  # Must be 256x256
+        binary: bool = True,
     ) -> pygltflib.GLTF2:
         """Build glTF mesh of the TIN from the nodes and triangles arrays, colored by a node value.
 
@@ -909,7 +917,7 @@ class tRIBSMeshViz:
             ])
 
         variable_data = self._values_to_texcoords(raw_variable_data)
-        gltf = self._assemble_gltf(nodes, self.triangles, self.normals, variable_data, color_ramp_file)
+        gltf = self._assemble_gltf(nodes, self.triangles, self.normals, variable_data, color_ramp_file, binary=binary)
         return gltf, raw_variable_data
 
     def _build_voronoi_gltf(
@@ -919,6 +927,7 @@ class tRIBSMeshViz:
         output_file: Path | str,
         output_variable: str,
         color_ramp_file: Path | str = None,  # Must be 256x256
+        binary: bool = True,
     ) -> tuple[pygltflib.GLTF2 | None, list | None]:
         """Build glTF mesh of the Voronoi cells, each cell uniformly colored by its value of an output variable.
 
@@ -942,7 +951,9 @@ class tRIBSMeshViz:
         geometry = self._build_voronoi_geometry()
         cell_texcoords = self._values_to_texcoords(cell_values)
         vertex_texcoords = cell_texcoords[geometry['vertex_cell']]
-        gltf = self._assemble_gltf(positions, geometry['triangles'], normals, vertex_texcoords, color_ramp_file)
+        gltf = self._assemble_gltf(
+            positions, geometry['triangles'], normals, vertex_texcoords, color_ramp_file, binary=binary
+        )
         return gltf, cell_values
 
     def _assemble_gltf(
@@ -952,6 +963,7 @@ class tRIBSMeshViz:
         normals: np.ndarray,
         variable_data: np.ndarray,
         color_ramp_file: Path | str = None,  # Must be 256x256
+        binary: bool = True,
     ) -> pygltflib.GLTF2:
         """Assemble a glTF from vertex positions, triangle indices, vertex normals and vertex texture coordinates.
 
@@ -961,6 +973,8 @@ class tRIBSMeshViz:
             normals: (V, 3) float32 vertex normals.
             variable_data: (V, 2) float32 texture coordinates into the color ramp image.
             color_ramp_file: Path to the 256x256 color ramp image.
+            binary: Prepare a binary glTF (.glb): the color ramp image is stored in the binary buffer and the buffer
+                is kept binary. Otherwise the image is a base64 data URI and the buffer is converted to a data URI.
         """
         assert nodes.dtype == np.float32, "Vertex positions must be float32."
         assert len(normals) == len(nodes), "Normals and vertex positions have different lengths."
@@ -1033,8 +1047,6 @@ class tRIBSMeshViz:
                 )
             ]
 
-        buffer_byte_length = len(triangles_binary_blob) + len(nodes_binary_blob) \
-            + len(normals_binary_blob) + len(variable_data_blob)
         buffer_binary_blob = triangles_binary_blob + nodes_binary_blob + normals_binary_blob + variable_data_blob
 
         samplers.append(pygltflib.Sampler(
@@ -1050,9 +1062,22 @@ class tRIBSMeshViz:
             )
         with open(color_ramp_file, 'rb') as f:
             image_data = f.read()
+        if binary:
+            # Store the image in the binary buffer (4-byte aligned) and reference it through a buffer view
+            padding = (-len(buffer_binary_blob)) % 4
+            buffer_binary_blob += b'\x00' * padding
+            buffer_views.append(pygltflib.BufferView(  # Color ramp image
+                buffer=0,
+                byteOffset=len(buffer_binary_blob),
+                byteLength=len(image_data),
+            ))
+            buffer_binary_blob += image_data
+            images.append(pygltflib.Image(bufferView=len(buffer_views) - 1, mimeType='image/png'))
+        else:
             images.append(
                 pygltflib.Image(uri=f'data:image/png;base64,{base64.b64encode(image_data).decode("utf-8")}', )
             )
+        buffer_byte_length = len(buffer_binary_blob)
         textures.append(pygltflib.Texture(
             sampler=0,
             source=0,
@@ -1089,7 +1114,8 @@ class tRIBSMeshViz:
             textures=textures,
         )
         gltf.set_binary_blob(buffer_binary_blob)
-        gltf.convert_buffers(pygltflib.BufferFormat.DATAURI)
+        if not binary:
+            gltf.convert_buffers(pygltflib.BufferFormat.DATAURI)
         return gltf
 
     def _set_materials(self, gltf: pygltflib.GLTF2) -> None:
