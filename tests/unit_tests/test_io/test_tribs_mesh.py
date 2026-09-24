@@ -51,7 +51,7 @@ def test_tRIBSMeshViz_compute_normals(tmv_factory, files_dir, mesh_basename):
 @pytest.mark.parametrize('mesh_basename', gltf_files)
 def test_tRIBSMeshViz_to_gltf_no_normals(tmv_factory, files_dir, mesh_basename, get_expected_gltf, assert_gltf_equal):
     mesh_epsg = '32613'
-    tmv = tmv_factory(mesh_basename, mesh_epsg)
+    tmv = tmv_factory(mesh_basename, mesh_epsg, voronoi_cells=False)  # Fixtures are TIN renderings
     color_ramp_file = os.path.join(files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'RedToBlue.png')
     temp_dir = tempfile.mkdtemp()
     gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
@@ -65,7 +65,7 @@ def test_tRIBSMeshViz_to_gltf_no_normals(tmv_factory, files_dir, mesh_basename, 
 def test_tRIBSMeshViz_to_gltf_normals(tmv_factory, files_dir, mesh_basename, get_expected_gltf, assert_gltf_equal):
     # Test Data
     mesh_epsg = '32613'
-    tmv = tmv_factory(mesh_basename, mesh_epsg)
+    tmv = tmv_factory(mesh_basename, mesh_epsg, voronoi_cells=False)  # Fixtures are TIN renderings
 
     color_ramp_file = os.path.join(files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'RedToBlue.png')
 
@@ -165,7 +165,7 @@ def test_given_color_ramp_file(tmv_factory, files_dir, get_expected_gltf, assert
     """Test that the color ramp file is used when provided."""
     mesh_basename = 'salas_outputs'
     mesh_epsg = '32613'
-    tmv = tmv_factory(mesh_basename, mesh_epsg)
+    tmv = tmv_factory(mesh_basename, mesh_epsg, voronoi_cells=False)  # Fixture is a TIN rendering
 
     temp_dir = tempfile.mkdtemp()
     gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
@@ -524,3 +524,47 @@ def test_glb_output(tmv_factory, files_dir):
     assert os.path.getsize(glb_file) < 0.8 * os.path.getsize(gltf_file)
     for a, b in zip(_read_gltf_accessors(glb_file), _read_gltf_accessors(gltf_file)):
         np.testing.assert_array_equal(a, b)
+
+
+def test_bare_mesh_renders_voronoi_cells_by_elevation(tmv_factory):
+    """A TIN dataset without simulation output is rendered as Voronoi cells colored by node elevation."""
+    mesh_basename = 'salas_outputs'
+    tmv = tmv_factory(mesh_basename, '32613')
+    temp_dir = tempfile.mkdtemp()
+    base = os.path.join(temp_dir, mesh_basename)
+    meta = tmv.to_gltf(base, '32613', generate_legend=True)
+    glb_file = f'{base}.glb'
+    assert os.path.exists(glb_file) and os.path.exists(f'{base}_legend.png')
+    assert len(meta['gltfs']) == 1
+
+    triangles, positions, _, texcoords = _read_gltf_accessors(glb_file)
+    geometry = tmv._build_voronoi_geometry()
+    assert len(positions) == len(geometry['positions'])
+    assert len(triangles) == len(geometry['triangles'])
+
+    # One uniform color per cell, ordered by the cell node's elevation
+    cell_ids = tmv.voronoi['ids']
+    ring_sizes = np.array([len(p) for p in tmv.voronoi['polygons']])
+    first_vertex = np.r_[0, np.cumsum(ring_sizes + 1)[:-1]]
+    z = tmv.nodes[cell_ids, 2].astype(np.float64)
+    expected = (z - z.min()) / (z.max() - z.min())
+    np.testing.assert_allclose(texcoords[first_vertex, 1], expected, atol=1e-6)
+    assert not (texcoords[:, 0] == 1.0).any()
+
+
+def _write_mesh(directory, name, nodes, triangles):
+    """Write minimal tRIBS .nodes/.z/.tri files. nodes: (x, y, z, boundary code); triangles: vertex index triples."""
+    base = os.path.join(directory, name)
+    with open(f'{base}.nodes', 'w') as f:
+        f.write(f' 0.000000\n{len(nodes)}\n')
+        for x, y, _, code in nodes:
+            f.write(f'{x} {y} 0 {code}\n')
+    with open(f'{base}.z', 'w') as f:
+        f.write(f' 0.000000\n{len(nodes)}\n')
+        for _, _, z, _ in nodes:
+            f.write(f'{z}\n')
+    with open(f'{base}.tri', 'w') as f:
+        f.write(f' 0.000000\n{len(triangles)}\n')
+        for a, b, c in triangles:
+            f.write(f'{a} {b} {c} -1 -1 -1 0 0 0\n')
+    return base
