@@ -568,3 +568,49 @@ def _write_mesh(directory, name, nodes, triangles):
         for a, b, c in triangles:
             f.write(f'{a} {b} {c} -1 -1 -1 0 0 0\n')
     return base
+
+
+def test_voronoi_cells_clipped_to_mesh(tmp_path):
+    """A flat boundary triangle has a circumcenter far outside the mesh; the cell is clipped to the mesh footprint."""
+    from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
+
+    # Interior node A with a fan of four triangles; ABC is very flat so its circumcenter is ~5 km south of the mesh
+    nodes = [
+        (0.0, 0.0, 10.0, 0),      # A (interior)
+        (-100.0, -1.0, 5.0, 1),   # B
+        (100.0, -1.0, 5.0, 1),    # C
+        (0.0, 50.0, 20.0, 1),     # D
+        (-60.0, 40.0, 15.0, 1),   # E
+    ]
+    triangles = [(0, 1, 2), (0, 2, 3), (0, 3, 4), (0, 4, 1)]
+    base = _write_mesh(tmp_path, 'fan', nodes, triangles)
+    tmv = tRIBSMeshViz(base, 32613)
+
+    # Unclipped cell reaches far outside
+    _, raw = tmv.compute_voronoi_from_tin()
+    assert raw[0][:, 1].min() < -1000
+
+    # Clipped cell stays within the mesh footprint (y >= -1 along the flat bottom edge)
+    ids, polygons = tmv.voronoi['ids'], tmv.voronoi['polygons']
+    np.testing.assert_array_equal(ids, [0])
+    cell = polygons[0]
+    assert cell[:, 1].min() >= -1.0 - 1e-6
+    assert tmv.mesh_domain.buffer(1e-6).contains(__import__('shapely').Polygon(cell))
+    assert len(cell) >= 3
+
+    # Geometry and glTF still build, with all vertices inside the mesh bounds
+    geometry = tmv._build_voronoi_geometry()
+    assert geometry['positions'][:, 1].min() >= -1.0 - 1e-6
+    out = tmv.to_gltf(os.path.join(tmp_path, 'fan'), 32613)
+    assert len(out['gltfs']) == 1
+
+
+def test_clipping_leaves_interior_cells_untouched(tmv_factory):
+    """Cells that are already inside the mesh (all of salas) are returned as read from the _voi file."""
+    from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
+
+    tmv = tmv_factory('salas_outputs', '32613')
+    ids, _, polygons = tRIBSMeshViz.read_voi_file(tmv.voi_file)
+    clipped_ids, clipped = tmv.voronoi['ids'], tmv.voronoi['polygons']
+    np.testing.assert_array_equal(clipped_ids, ids)
+    assert all(len(a) == len(b) and np.allclose(a, b) for a, b in zip(clipped, polygons))
