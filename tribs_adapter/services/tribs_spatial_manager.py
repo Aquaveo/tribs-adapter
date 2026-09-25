@@ -44,6 +44,8 @@ class TribsSpatialManager(ResourceSpatialManager):
     WORKSPACE = 'tribs'
     URI = 'http://portal.aquaveo.com/tribs'
     SLD_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates', 'sld_templates')
+    # glTF files written by tRIBSMeshViz: binary (.glb, current) and JSON (.gltf, older datasets)
+    GLTF_EXTENSIONS = (tRIBSMeshViz.GLB_EXTENSION, tRIBSMeshViz.GLTF_EXTENSION)
     S_RASTER = 'raster'  # built-in style in geoserver
     S_RASTER_CONT = 'raster_continuous'
     S_RASTER_DISC = 'raster_discrete'
@@ -93,10 +95,26 @@ class TribsSpatialManager(ResourceSpatialManager):
     }
 
     # Override parent class GEOSERVER_CLUSTER_PORTS attribute with local environment var
-    try:
-        GEOSERVER_CLUSTER_PORTS = json.loads(os.environ.get("GEOSERVER_CLUSTER_PORTS"))
-    except (json.JSONDecodeError, TypeError):
-        GEOSERVER_CLUSTER_PORTS = [8081, 8082, 8083, 8084]
+    @staticmethod
+    def _parse_cluster_ports(value, default=(8081, 8082, 8083, 8084)):
+        """Parse the GEOSERVER_CLUSTER_PORTS environment value (a JSON list of ints, e.g. "[8080]").
+
+        Tolerates a single port ("8080") and an extra level of quoting ('"[8080]"') that some env loaders leave in
+        place; anything else falls back to the default ports.
+        """
+        try:
+            ports = json.loads(value)
+            if isinstance(ports, str):  # e.g. '"[8080]"' -> '[8080]'
+                ports = json.loads(ports)
+            if isinstance(ports, int):
+                ports = [ports]
+            ports = [int(p) for p in ports]
+        except (json.JSONDecodeError, TypeError, ValueError):
+            log.warning(f'Invalid GEOSERVER_CLUSTER_PORTS value {value!r}. Using default ports {list(default)}.')
+            return list(default)
+        return ports
+
+    GEOSERVER_CLUSTER_PORTS = _parse_cluster_ports(os.environ.get("GEOSERVER_CLUSTER_PORTS"))
     log.debug(f"GEOSERVER_CLUSTER_PORTS set to {GEOSERVER_CLUSTER_PORTS}")
 
     def __init__(self, geoserver_engine, reload_ports=GEOSERVER_CLUSTER_PORTS):
@@ -273,7 +291,7 @@ class TribsSpatialManager(ResourceSpatialManager):
             gltf_files = os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf'))
             viz_urls = [
                 os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.gltf')
+                for f in gltf_files if f.endswith(self.GLTF_EXTENSIONS)
             ]
             legend_urls = [
                 os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
@@ -305,7 +323,7 @@ class TribsSpatialManager(ResourceSpatialManager):
             gltf_files = os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf'))
             viz_urls = [
                 os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.gltf')
+                for f in gltf_files if f.endswith(self.GLTF_EXTENSIONS)
             ]
             legend_urls = [
                 os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
@@ -797,11 +815,15 @@ class TribsSpatialManager(ResourceSpatialManager):
             output_collection_path = output_dataset.file_collection_client.path
             output_files = [
                 os.path.join(output_collection_path, f) for f in os.listdir(output_collection_path)
-                if not f.endswith('.json') and os.path.isfile(os.path.join(output_collection_path, f))
+                if self._is_tribs_variable_output_file(os.path.join(output_collection_path, f))
             ]
 
+        # Find the tRIBS Voronoi polygon file (_voi) that goes with the mesh, if there is one. Output variables are
+        # rendered on the Voronoi cells, which are computed from the TIN when no _voi file is available.
+        voi_file = self._find_voi_file(mesh_file, output_collection_path)
+
         # Create the gltf
-        tribs_mesh = tRIBSMeshViz(mesh_file, mesh_epsg=mesh_epsg, output_files=output_files)
+        tribs_mesh = tRIBSMeshViz(mesh_file, mesh_epsg=mesh_epsg, output_files=output_files, voi_file=voi_file)
         meta = tribs_mesh.to_gltf(
             gltf_out_path, to_epsg=mesh_epsg, output_variables=output_variables, generate_legend=True
         )
@@ -820,6 +842,39 @@ class TribsSpatialManager(ResourceSpatialManager):
         # Add the gltf to the dataset
         dataset_to_add_to.file_collection_client.add_item(gltf_path)
         return meta
+
+    @staticmethod
+    def _is_tribs_variable_output_file(path):
+        """Whether the given file is a tRIBS spatial variable output file (_00d/_00i) rather than a companion file."""
+        if not os.path.isfile(path):
+            return False
+        name = os.path.basename(path)
+        companions = ('.json', '.png', '_voi', '_area', '_reach', '_width') + TribsSpatialManager.GLTF_EXTENSIONS
+        return not name.endswith(companions)
+
+    @staticmethod
+    def _find_voi_file(mesh_file, output_collection_path=None):
+        """Find the tRIBS Voronoi polygon file (_voi) for a mesh.
+
+        Looks next to the mesh files first (``<mesh_file>_voi``), then for any ``*_voi`` file in the output dataset
+        collection (tRIBS writes the _voi file with the spatial output files).
+
+        Args:
+            mesh_file(str): Basename path of the mesh files (path without extension).
+            output_collection_path(str): Path of the output dataset file collection, if any.
+
+        Returns:
+            str: Path to the _voi file or None if none was found.
+        """
+        candidates = [f'{mesh_file}_voi']
+        if output_collection_path is not None:
+            candidates.extend(sorted(glob.glob(os.path.join(glob.escape(output_collection_path), '*_voi'))))
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                log.info(f'Using Voronoi polygon file: {candidate}')
+                return candidate
+        log.info(f'No Voronoi polygon (_voi) file found for mesh {mesh_file}.')
+        return None
 
     def create_tribs_czml_layer(self, dataset, session, files, srid):
         """
