@@ -130,7 +130,7 @@ def mesh_basename_factory(gltf_dir):
 
 @pytest.fixture
 def tmv_factory(mesh_basename_factory, gltf_dir):
-    def factory(mesh_basename, mesh_epsg, output_files=None):
+    def factory(mesh_basename, mesh_epsg, output_files=None, **kwargs):
         if output_files is not None:
             ofs = [os.path.join(gltf_dir, mesh_basename, of) for of in output_files]
         else:
@@ -140,6 +140,7 @@ def tmv_factory(mesh_basename_factory, gltf_dir):
             mesh_basename=mesh_basename_path,
             mesh_epsg=mesh_epsg,
             output_files=ofs,
+            **kwargs,
         )
 
     return factory
