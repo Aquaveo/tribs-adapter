@@ -21,16 +21,12 @@ log = logging.getLogger(__name__)
 class tRIBSMeshViz:
     """tRIBS mesh visualization class for writing tRIBS mesh visualization files (glTF).
 
-    Two kinds of geometry can be written:
-
-    * The Voronoi cells (the tRIBS computational elements), the default. Each cell is a separate fan of triangles
-      with a single, uniform color so values are never interpolated between neighboring cells. With output files
-      (``_00d``/``_00i``) a cell is colored by its value of the chosen variable; without them (a bare mesh) by the
-      elevation of its node. Cell polygons are read from the tRIBS ``*_voi`` file when one is available and
-      otherwise computed from the TIN (Voronoi vertices are the circumcenters of the triangles that surround each
-      node, which is exactly how tRIBS derives them).
-    * The TIN itself (``.nodes``/``.z``/``.tri``) with values on its vertices, interpolated across triangles by the
-      renderer (``voronoi_cells=False``, the previous behavior).
+    The geometry written is the Voronoi cells (the tRIBS computational elements). Each cell is a separate fan of
+    triangles with a single, uniform color so values are never interpolated between neighboring cells. With output
+    files (``_00d``/``_00i``) a cell is colored by its value of the chosen variable; without them (a bare mesh) by the
+    elevation of its node. Cell polygons are read from the tRIBS ``*_voi`` file when one is available and otherwise
+    computed from the TIN (Voronoi vertices are the circumcenters of the triangles that surround each node, which is
+    exactly how tRIBS derives them). The cells are draped on the TIN surface (``.nodes``/``.z``/``.tri``).
     """
     # Boundary codes of the nodes that tRIBS treats as active computational elements (interior and stream nodes).
     # Only these nodes have Voronoi cells and rows in the _00d/_00i output files.
@@ -53,7 +49,6 @@ class tRIBSMeshViz:
         mesh_epsg: int | str,
         output_files: list[Path | str] = None,
         voi_file: Path | str = None,
-        voronoi_cells: bool = True,
         clip_cells_to_mesh: bool = True,
     ) -> None:
         """Initialize tRIBSMeshViz object.
@@ -65,7 +60,6 @@ class tRIBSMeshViz:
             output_files: List of output files (_00d/_00i) to read and visualize.
             voi_file: Path to the tRIBS ``*_voi`` Voronoi polygon file. Defaults to ``<mesh_basename>_voi`` if that
                 file exists. When no file is available the Voronoi cells are computed from the TIN.
-            voronoi_cells: Render on the Voronoi cells (True, default) instead of on the TIN vertices.
             clip_cells_to_mesh: Clip the Voronoi cells to the footprint of the TIN (default True). Cells at the
                 mesh boundary can extend far outside the mesh because their vertices are circumcenters of flat
                 boundary triangles; clipping removes those spikes from the rendering only, the mesh and _voi files
@@ -81,8 +75,6 @@ class tRIBSMeshViz:
         self.nodes = self._reassign_bad_z_values(self.nodes) if (self.nodes[:, 2] < -1e8).any() else self.nodes
         self.output_files = output_files
         self._data = None  # Lazily loaded by the ``data`` property
-        self.normals = None
-        self.voronoi_cells = voronoi_cells
         self.clip_cells_to_mesh = clip_cells_to_mesh
         self.voi_file = self._resolve_voi_file(voi_file)
         self._voronoi = None  # Lazily loaded by the ``voronoi`` property
@@ -97,26 +89,6 @@ class tRIBSMeshViz:
             log.debug("Data is being loaded.")
             self._parse_output_data()
         return self._data
-
-    def compute_normals(self) -> np.ndarray:
-        """Compute normals for the given nodes and triangles arrays.
-
-        Returns:
-            Array of normals for each node.
-        """
-        separator()
-        log.debug("Computing normals...")
-        # Credits: https://sites.google.com/site/dlampetest/python/calculating-normals-of-a-triangle-mesh-using-numpy
-        self.normals = np.zeros(self.nodes.shape, dtype=self.nodes.dtype)
-        tris = self.nodes[self.triangles]
-        n = np.cross(tris[::, 1] - tris[::, 0], tris[::, 1] - tris[::, 2])  # TODO: order of subtraction?
-        self._normalize_v3(n)
-        self.normals[self.triangles[:, 0]] += n
-        self.normals[self.triangles[:, 1]] += n
-        self.normals[self.triangles[:, 2]] += n
-        self._normalize_v3(self.normals)
-        log.debug("Normals Summary:")
-        self._summarize_array(self.normals)
 
     # ------------------------------------------------------------------------------------------------------------------
     # Voronoi cells
@@ -628,16 +600,6 @@ class tRIBSMeshViz:
 
         to_epsg = int(to_epsg) if isinstance(to_epsg, str) else to_epsg
 
-        # Output variables (and the bare mesh, colored by elevation) are rendered on the Voronoi cells unless
-        # voronoi_cells is False, in which case the TIN itself is rendered with values on its vertices.
-        use_voronoi_cells = self.voronoi_cells
-
-        # computer normals
-        if self.normals is None:
-            self.compute_normals()
-
-        assert self.normals is not None, "Normals have not been computed."
-
         model_center, crs_center = self._compute_centers()
         min_x, min_y, _, max_x, max_y, _ = self._compute_model_bounds()
         # expand bounding box by 10%
@@ -647,14 +609,12 @@ class tRIBSMeshViz:
         max_x += (max_x - min_x) * percentage
         max_y += (max_y - min_y) * percentage
         model_extents = [min_x, min_y, max_x, max_y]
-        origin_location, localized_nodes = self._localize_crs(to_epsg=to_epsg)
-        localized_nodes = self._to_nue(localized_nodes, z_offset=z_offset)
 
-        if use_voronoi_cells:
-            geometry = self._build_voronoi_geometry()
-            _, localized_cells = self._localize_crs(to_epsg=to_epsg, points=geometry['positions'])
-            localized_cells = self._to_nue(localized_cells, z_offset=z_offset)
-            cell_normals = self._compute_vertex_normals(localized_cells, geometry['triangles'])
+        # Output variables (and the bare mesh, colored by elevation) are rendered on the Voronoi cells.
+        geometry = self._build_voronoi_geometry()
+        origin_location, localized_cells = self._localize_crs(to_epsg=to_epsg, points=geometry['positions'])
+        localized_cells = self._to_nue(localized_cells, z_offset=z_offset)
+        cell_normals = self._compute_vertex_normals(localized_cells, geometry['triangles'])
 
         if color_ramp_file is None:
             file_name = 'TopoAtlasShader'
@@ -664,13 +624,10 @@ class tRIBSMeshViz:
 
         log.debug("Saving glTF file...")
         if len(self.output_files) == 0:
-            if use_voronoi_cells:
-                gltf, variable_data = self._build_voronoi_gltf(
-                    localized_cells, cell_normals, cell_values=self._cell_elevations(), color_ramp_file=color_ramp_file,
-                    binary=binary,
-                )
-            else:
-                gltf, variable_data = self._build_gltf(localized_nodes, color_ramp_file=color_ramp_file, binary=binary)
+            gltf, variable_data = self._build_voronoi_gltf(
+                localized_cells, cell_normals, cell_values=self._cell_elevations(), color_ramp_file=color_ramp_file,
+                binary=binary,
+            )
             gltf = self._set_materials(gltf)
             gltf_file_path = Path(f'{gltf_path}{extension}')
             gltf.save(str(gltf_file_path))
@@ -684,15 +641,10 @@ class tRIBSMeshViz:
                 file_variables = output_variables if output_variables is not None else self.data[output_file].keys()
                 for variable in file_variables:
                     gltf_file_path = Path(f'{gltf_path}_{basefile_name}_{variable}{extension}')
-                    if use_voronoi_cells:
-                        gltf, variable_data = self._build_voronoi_gltf(
-                            localized_cells, cell_normals, output_file, variable, color_ramp_file=color_ramp_file,
-                            binary=binary,
-                        )
-                    else:
-                        gltf, variable_data = self._build_gltf(
-                            localized_nodes, output_file, variable, color_ramp_file=color_ramp_file, binary=binary
-                        )
+                    gltf, variable_data = self._build_voronoi_gltf(
+                        localized_cells, cell_normals, output_file, variable, color_ramp_file=color_ramp_file,
+                        binary=binary,
+                    )
                     if gltf is not None:
                         gltf = self._set_materials(gltf)
                         separator()
@@ -972,41 +924,6 @@ class tRIBSMeshViz:
         """
         normalized = self._interpolate_array(values)
         return np.array([[0.0, x] if x is not None else [1.0, 1.0] for x in normalized], dtype=np.float32)
-
-    def _build_gltf(
-        self,
-        nodes: np.ndarray,
-        output_file: Path | str = None,
-        output_variable: str = None,
-        color_ramp_file: Path | str = None,  # Must be 256x256
-        binary: bool = True,
-    ) -> pygltflib.GLTF2:
-        """Build glTF mesh of the TIN from the nodes and triangles arrays, colored by a node value.
-
-        Values are attached to the TIN vertices (and hence interpolated across triangles by the renderer). Without an
-        output file the active nodes are colored by elevation.
-        """
-        separator()
-        log.debug("Building glTF (TIN)...")
-
-        # Get Variables from data
-        if output_file is not None:
-            file_data = self.data[output_file]
-            if output_variable not in file_data:
-                log.warning(f"Output variable {output_variable} not found in {output_file}.")
-                return None, None
-            raw_variable_data = np.array(
-                file_data[output_variable].tolist() +
-                [None for _ in range(len(nodes) - len(file_data[output_variable]))]
-            )[:len(nodes)]
-        else:
-            raw_variable_data = np.array([
-                self.nodes[i][2] if x in self.ACTIVE_BOUNDARY_CODES else None for i, x in enumerate(self.boundary_types)
-            ])
-
-        variable_data = self._values_to_texcoords(raw_variable_data)
-        gltf = self._assemble_gltf(nodes, self.triangles, self.normals, variable_data, color_ramp_file, binary=binary)
-        return gltf, raw_variable_data
 
     def _build_voronoi_gltf(
         self,
@@ -1339,8 +1256,7 @@ def separator() -> None:
 
 def main(args):  # pragma: no cover
     tribs_mesh = tRIBSMeshViz(
-        args.mesh, args.srid, args.output_files, voi_file=args.voi, voronoi_cells=not args.tin,
-        clip_cells_to_mesh=not args.no_clip,
+        args.mesh, args.srid, args.output_files, voi_file=args.voi, clip_cells_to_mesh=not args.no_clip,
     )
     tribs_mesh.to_gltf(args.gltf, output_variables=args.variables, generate_legend=args.legend)
 
@@ -1352,10 +1268,6 @@ def parse_args():  # pragma: no cover
     parser.add_argument('srid', type=int, help='EPSG code of the coordinate system used by the mesh file (e.g. 26912).')
     parser.add_argument('-d', '--debug', default=False, action='store_true', help='Enable debug logging.')
     parser.add_argument('--voi', default=None, help='Path to the tRIBS _voi file (defaults to <mesh>_voi if present).')
-    parser.add_argument(
-        '--tin', default=False, action='store_true',
-        help='Render output variables on the TIN instead of on the Voronoi cells.'
-    )
     parser.add_argument(
         '-v', '--variables', nargs='*', default=None, help='Output variables to visualize (default: all).'
     )
