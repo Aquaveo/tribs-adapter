@@ -778,7 +778,7 @@ class TribsSpatialManager(ResourceSpatialManager):
 
     def create_tribs_tin_layer(self, dataset, mesh_epsg, output_dataset=None, output_variables=None):
         """
-        Create a GeoServer raster layer for a project.
+        Write the glTF visualization (Voronoi cells draped on the TIN) for a tRIBS mesh dataset.
 
         Args:
             dataset(tribs_adapter.resources.dataset.Dataset): Dataset instance.

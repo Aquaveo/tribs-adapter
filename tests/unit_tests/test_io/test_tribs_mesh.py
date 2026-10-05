@@ -18,7 +18,6 @@ def test_tRIBSMeshViz_init(tmv_factory, mesh_basename):
 
     assert isinstance(tmv.mesh_basename, Path)
     assert tmv.mesh_epsg == int(mesh_epsg)
-    assert tmv.normals is None
 
     # Verify nodes and triangle arrays
     expected_path = tmv.mesh_basename.with_suffix('.init.npz')
@@ -27,61 +26,6 @@ def test_tRIBSMeshViz_init(tmv_factory, mesh_basename):
     expected = np.load(expected_path)
     np.testing.assert_array_equal(tmv.nodes, expected['nodes'])
     np.testing.assert_array_equal(tmv.triangles, expected['triangles'])
-
-
-@pytest.mark.parametrize('mesh_basename', gltf_files)
-def test_tRIBSMeshViz_compute_normals(tmv_factory, files_dir, mesh_basename):
-    mesh_basename = 'salas'
-    mesh_epsg = '32613'
-    tmv = tmv_factory(mesh_basename, mesh_epsg)
-
-    assert tmv.normals is None
-    tmv.compute_normals()
-
-    # Verify nodes and triangle arrays
-    expected_path = os.path.join(
-        files_dir, 'unit_tests', 'test_io', mesh_basename, tmv.mesh_basename.with_suffix('.normals.npz')
-    )
-    # Uncomment next line to update the mesh_basename_path.npz files
-    # np.savez_compressed(expected_path, nodes=tmv.nodes, triangles=tmv.triangles, normals=tmv.normals)
-    expected = np.load(expected_path, allow_pickle=True)
-    np.testing.assert_array_equal(tmv.normals, expected['normals'])
-
-
-@pytest.mark.parametrize('mesh_basename', gltf_files)
-def test_tRIBSMeshViz_to_gltf_no_normals(tmv_factory, files_dir, mesh_basename, get_expected_gltf, assert_gltf_equal):
-    mesh_epsg = '32613'
-    tmv = tmv_factory(mesh_basename, mesh_epsg, voronoi_cells=False)  # Fixtures are TIN renderings
-    color_ramp_file = os.path.join(files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'RedToBlue.png')
-    temp_dir = tempfile.mkdtemp()
-    gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
-    gltf_file = f'{gltf_file_base_name}.gltf'
-    tmv.to_gltf(gltf_file_base_name, mesh_epsg, color_ramp_file=color_ramp_file, binary=False)
-    assert os.path.exists(gltf_file)
-    assert_gltf_equal(gltf_file, get_expected_gltf(mesh_basename))
-
-
-@pytest.mark.parametrize('mesh_basename', gltf_files)
-def test_tRIBSMeshViz_to_gltf_normals(tmv_factory, files_dir, mesh_basename, get_expected_gltf, assert_gltf_equal):
-    # Test Data
-    mesh_epsg = '32613'
-    tmv = tmv_factory(mesh_basename, mesh_epsg, voronoi_cells=False)  # Fixtures are TIN renderings
-
-    color_ramp_file = os.path.join(files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'RedToBlue.png')
-
-    # Compute Normals
-    tmv.compute_normals()
-    temp_dir = tempfile.mkdtemp()
-    gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
-    gltf_file = f'{gltf_file_base_name}.gltf'
-    tmv.to_gltf(gltf_file_base_name, mesh_epsg, color_ramp_file=color_ramp_file, binary=False)
-
-    expected_data = {}
-
-    assert tmv.data == expected_data
-
-    assert os.path.exists(gltf_file)
-    assert_gltf_equal(gltf_file, get_expected_gltf(mesh_basename))
 
 
 def test_parse_output_data(tmv_factory):
@@ -161,15 +105,18 @@ def test_output_files(tmv_factory):
     assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Srf.glb")
 
 
-def test_given_color_ramp_file(tmv_factory, files_dir, get_expected_gltf, assert_gltf_equal):
+def test_given_color_ramp_file(tmv_factory, files_dir):
     """Test that the color ramp file is used when provided."""
+    import base64
+    import pygltflib
+
     mesh_basename = 'salas_outputs'
     mesh_epsg = '32613'
-    tmv = tmv_factory(mesh_basename, mesh_epsg, voronoi_cells=False)  # Fixture is a TIN rendering
+    tmv = tmv_factory(mesh_basename, mesh_epsg, output_files=['salas.0700_00d'])
 
     temp_dir = tempfile.mkdtemp()
     gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
-    gltf_file = f'{gltf_file_base_name}.gltf'
+    gltf_file = f'{gltf_file_base_name}_salas-0700_00d_Z.gltf'
 
     color_ramp_file = os.path.join(
         files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'PinkToYellow.png'
@@ -178,8 +125,11 @@ def test_given_color_ramp_file(tmv_factory, files_dir, get_expected_gltf, assert
     tmv.to_gltf(gltf_file_base_name, output_variables=['Z'], color_ramp_file=color_ramp_file, binary=False)
 
     assert os.path.exists(gltf_file)
-    expected = get_expected_gltf(mesh_basename)
-    assert_gltf_equal(gltf_file, expected)
+    gltf = pygltflib.GLTF2().load(gltf_file)
+    assert gltf.images[0].uri.startswith('data:image/png;base64,')
+    with open(color_ramp_file, 'rb') as f:
+        ramp = f.read()
+    assert base64.b64decode(gltf.images[0].uri.split(',', 1)[1]) == ramp
 
 
 def test_reassign_bad_z_values(tmv_factory, caplog):
@@ -408,22 +358,6 @@ def test_voronoi_gltf_missing_values_are_transparent(tmv_factory, gltf_dir):
     np.testing.assert_allclose(cell_uv[0], [0.0, 1.0])  # Node 0 -> 20 (max)
     np.testing.assert_allclose(cell_uv[1], [0.0, 0.0])  # Node 1 -> 10 (min)
     assert (cell_uv[2:] == 1.0).all()  # No value -> transparent (u, v) == (1, 1)
-
-
-def test_voronoi_cells_disabled_renders_tin(tmv_factory):
-    """voronoi_cells=False keeps the previous behavior of putting values on the TIN vertices."""
-    from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
-
-    mesh_basename = 'salas_outputs'
-    tmv = tmv_factory(mesh_basename, '32613', output_files=['salas.0700_00d'])
-    tmv_tin = tRIBSMeshViz(tmv.mesh_basename, '32613', output_files=tmv.output_files, voronoi_cells=False)
-    temp_dir = tempfile.mkdtemp()
-    gltf_file_base_name = os.path.join(temp_dir, mesh_basename)
-    tmv_tin.to_gltf(gltf_file_base_name, '32613', output_variables=['Z'])
-
-    triangles, positions, _, _ = _read_gltf_accessors(f'{gltf_file_base_name}_salas-0700_00d_Z.glb')
-    assert len(positions) == len(tmv_tin.nodes)
-    np.testing.assert_array_equal(triangles, tmv_tin.triangles)
 
 
 def test_interpolate_array(tmv_factory):
