@@ -3,6 +3,7 @@ import base64
 import csv
 import logging
 import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,32 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt  # noqa: E402
 
 log = logging.getLogger(__name__)
+
+# tRIBS spatial output file names: <basename>.<HHHH>_<MM><d|i>, where HHHH is the number of hours since the start
+# of the simulation, MM the minutes, "d" marks time-dynamic output and "i" time-integrated output.
+OUTPUT_FILE_RE = re.compile(r'^(?P<base>.+)\.(?P<hours>\d{4,})_(?P<minutes>\d{2})(?P<kind>[di])$')
+
+
+def parse_output_file_name(path: Path | str) -> dict | None:
+    """Parse the time stamp out of a tRIBS spatial output file name.
+
+    Args:
+        path: Path (or bare name) of a tRIBS spatial output file, e.g. ``/out/salas.0010_00d``.
+
+    Returns:
+        ``{'base': 'salas', 'hours': 10, 'minutes': 0, 'total_hours': 10, 'kind': 'd'}`` or None when the name is
+        not a tRIBS spatial output file (e.g. ``salas_voi``, ``salas.glb``, ``..._legend.png``). ``total_hours`` is an
+        int when the minutes are zero and a float otherwise.
+    """
+    match = OUTPUT_FILE_RE.match(os.path.basename(str(path)))
+    if match is None:
+        return None
+    hours = int(match.group('hours'))
+    minutes = int(match.group('minutes'))
+    total_hours = hours if minutes == 0 else hours + minutes / 60
+    return dict(
+        base=match.group('base'), hours=hours, minutes=minutes, total_hours=total_hours, kind=match.group('kind')
+    )
 
 
 class tRIBSMeshViz:
@@ -35,6 +62,13 @@ class tRIBSMeshViz:
     # Name of the column that holds the node ID in the _00d/_00i output files. tRIBS assigns node IDs from the
     # row order of the input .nodes file, so an ID is also the row index of the node in ``self.nodes``.
     ID_COLUMN = 'ID'
+
+    # Columns of the _00d/_00i output files that identify a node rather than hold a simulated value. They are
+    # skipped when all variables of a file are rendered (an explicit ``output_variables`` list can still name them).
+    NON_VARIABLE_COLUMNS = (ID_COLUMN, 'BndCd')
+
+    # Variable name used for the bare mesh (no output files), whose cells are colored by elevation.
+    ELEVATION_VARIABLE = 'Elevation'
 
     # Tolerance (in mesh units, i.e. meters) used to match the node centers in a _voi file with the mesh nodes.
     VOI_CENTER_TOLERANCE = 1.0
@@ -592,10 +626,26 @@ class tRIBSMeshViz:
                 and the color ramp image embedded as base64 data URIs (about a third larger).
 
         Returns:
-            Dictionary with metadata about the generated glTF files.
+            Dictionary with metadata about the generated glTF files::
+
+                {
+                    'gltfs': [pygltflib.GLTF2, ...],
+                    'origin': [lon, lat, z],
+                    'extents': [min_x, min_y, max_x, max_y],
+                    'files': [
+                        {'variable': 'Mu', 'output_file': '/out/salas.0010_00d', 'hours': 10, 'kind': 'd',
+                         'gltf': '/path/to/out_salas-0010_00d_Mu.glb', 'legend': '/path/to/..._legend.png' or None},
+                        ...
+                    ],
+                }
+
+            ``files`` has one entry per glTF written, in the order they were written. For the bare mesh (no output
+            files) the single entry has ``variable='Elevation'`` and ``output_file``, ``hours`` and ``kind`` set to
+            None.
         """
         self.data  # Ensure data is loaded
         generated_gltfs = []
+        generated_files = []
         extension = self.GLB_EXTENSION if binary else self.GLTF_EXTENSION
 
         to_epsg = int(to_epsg) if isinstance(to_epsg, str) else to_epsg
@@ -632,13 +682,24 @@ class tRIBSMeshViz:
             gltf_file_path = Path(f'{gltf_path}{extension}')
             gltf.save(str(gltf_file_path))
             generated_gltfs.append(gltf)
+            legend_path = None
             if generate_legend:
                 legend_path = str(gltf_file_path)[:-len(extension)] + '_legend.png'
                 self._generate_legend_for_values(variable_data, legend_path, color_ramp_file)
+            generated_files.append(dict(
+                variable=self.ELEVATION_VARIABLE, output_file=None, hours=None, kind=None,
+                gltf=str(gltf_file_path), legend=legend_path,
+            ))
         else:
             for output_file in self.output_files:  # Get the file basename and clean out special characters
                 basefile_name = os.path.basename(output_file).replace('.', '-')
-                file_variables = output_variables if output_variables is not None else self.data[output_file].keys()
+                time_stamp = parse_output_file_name(output_file)
+                if time_stamp is None:
+                    log.warning(f"Could not parse a time stamp out of output file name: {output_file}")
+                if output_variables is not None:
+                    file_variables = output_variables
+                else:
+                    file_variables = [v for v in self.data[output_file].keys() if v not in self.NON_VARIABLE_COLUMNS]
                 for variable in file_variables:
                     gltf_file_path = Path(f'{gltf_path}_{basefile_name}_{variable}{extension}')
                     gltf, variable_data = self._build_voronoi_gltf(
@@ -651,9 +712,18 @@ class tRIBSMeshViz:
                         log.debug("Saving glTF file...")
                         gltf.save(str(gltf_file_path))
                         generated_gltfs.append(gltf)
+                        legend_path = None
                         if generate_legend:
                             legend_path = str(gltf_file_path)[:-len(extension)] + '_legend.png'
                             self._generate_legend_for_values(variable_data, legend_path, color_ramp_file)
+                        generated_files.append(dict(
+                            variable=variable,
+                            output_file=str(output_file),
+                            hours=time_stamp['total_hours'] if time_stamp else None,
+                            kind=time_stamp['kind'] if time_stamp else None,
+                            gltf=str(gltf_file_path),
+                            legend=legend_path,
+                        ))
 
         separator()
         log.info(f"Successfully created glTF: {str(gltf_path)}")
@@ -664,6 +734,7 @@ class tRIBSMeshViz:
             gltfs=generated_gltfs,
             origin=model_center,
             extents=model_extents,
+            files=generated_files,
         )
         return meta
 
@@ -751,7 +822,9 @@ class tRIBSMeshViz:
             with open(output_basename) as output_file:
                 log.info(f"Reading output file: {output_basename}...")
                 reader = csv.reader(output_file)
-                header = next(reader)
+                # Some tRIBS builds pad header names with spaces (e.g. "VegFraction "), which would otherwise leak
+                # into the glTF file names.
+                header = [h.strip() for h in next(reader)]
                 colmap = dict(zip(header, range(len(header))))
             file_data = np.array(np.loadtxt(output_basename, delimiter=",", skiprows=1))
             for header, col in colmap.items():

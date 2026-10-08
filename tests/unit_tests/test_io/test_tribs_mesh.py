@@ -61,25 +61,36 @@ def test_output_files(tmv_factory):
     tm = tmv_factory(mesh_basename, mesh_epsg, output_files=['salas.0700_00d'])
     temp_dir = tempfile.mkdtemp()
     gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
-    tm.to_gltf(gltf_file_base_name, mesh_epsg, output_variables=['Z'])
+    meta = tm.to_gltf(gltf_file_base_name, mesh_epsg, output_variables=['Z'])
 
     gltf_z_file = f'{gltf_file_base_name}_salas-0700_00d_Z.glb'
     assert os.path.exists(gltf_z_file)
     assert len(os.listdir(temp_dir)) == 1
+    # Per-file metadata: variable, time stamp parsed from the output file name, and paths
+    assert meta['files'] == [dict(
+        variable='Z', output_file=os.path.join(tm.mesh_basename.parent, 'salas.0700_00d'), hours=700, kind='d',
+        gltf=gltf_z_file, legend=None,
+    )]
 
     temp_dir_2 = tempfile.mkdtemp()
     gltf2_file_base_name = os.path.join(temp_dir_2, f'{mesh_basename}')
 
-    tm.to_gltf(gltf2_file_base_name, output_variables=['BadVar'])
+    meta2 = tm.to_gltf(gltf2_file_base_name, output_variables=['BadVar'])
     assert len(os.listdir(temp_dir_2)) == 0
+    assert meta2['files'] == []
 
     temp_dir_3 = tempfile.mkdtemp()
     gltf3_file_base_name = os.path.join(temp_dir_3, f'{mesh_basename}')
 
-    tm.to_gltf(gltf3_file_base_name)
-    assert len(os.listdir(temp_dir_3)) == 25
+    meta3 = tm.to_gltf(gltf3_file_base_name, generate_legend=True)
+    # One glb and one legend per variable; the ID column is not a variable
+    assert len(os.listdir(temp_dir_3)) == 48
+    assert not os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_ID.glb")
+    assert len(meta3['files']) == 24
+    assert all(f['hours'] == 700 and f['kind'] == 'd' for f in meta3['files'])
+    assert all(os.path.exists(f['gltf']) and os.path.exists(f['legend']) for f in meta3['files'])
+    assert [f['variable'] for f in meta3['files']][:3] == ['Z', 'S', 'CAr']
     assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_EvpSoil.glb")
-    assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_ID.glb")
     assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Nt.glb")
     assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Rain.glb")
     assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Z.glb")
@@ -551,3 +562,37 @@ def test_clipping_leaves_interior_cells_untouched(tmv_factory):
     clipped_ids, clipped = tmv.voronoi['ids'], tmv.voronoi['polygons']
     np.testing.assert_array_equal(clipped_ids, ids)
     assert all(len(a) == len(b) and np.allclose(a, b) for a, b in zip(clipped, polygons))
+
+
+@pytest.mark.parametrize('name, expected', [
+    ('salas.0000_00d', dict(base='salas', hours=0, minutes=0, total_hours=0, kind='d')),
+    ('/some/dir/salas.0010_00d', dict(base='salas', hours=10, minutes=0, total_hours=10, kind='d')),
+    ('examplebasin.0700_00i', dict(base='examplebasin', hours=700, minutes=0, total_hours=700, kind='i')),
+    ('x.0012_30d', dict(base='x', hours=12, minutes=30, total_hours=12.5, kind='d')),
+    ('my.basin.12345_00d', dict(base='my.basin', hours=12345, minutes=0, total_hours=12345, kind='d')),
+    ('salas_voi', None),
+    ('salas.glb', None),
+    ('salas_salas-0010_00d_Mu.glb', None),
+    ('salas.0010_00d_legend.png', None),
+    ('salas.nodes', None),
+])
+def test_parse_output_file_name(name, expected):
+    from tribs_adapter.io.tribs_mesh import parse_output_file_name
+    result = parse_output_file_name(name)
+    assert result == expected
+    if expected is not None:
+        assert isinstance(result['total_hours'], int if expected['minutes'] == 0 else float)
+
+
+def test_bare_mesh_files_meta(tmv_factory):
+    """The bare mesh (no output files) reports a single static Elevation entry."""
+    tmv = tmv_factory('salas', '32613')
+    temp_dir = tempfile.mkdtemp()
+    gltf_file_base_name = os.path.join(temp_dir, 'salas')
+    meta = tmv.to_gltf(gltf_file_base_name, generate_legend=True)
+    assert meta['files'] == [dict(
+        variable='Elevation', output_file=None, hours=None, kind=None,
+        gltf=f'{gltf_file_base_name}.glb', legend=f'{gltf_file_base_name}_legend.png',
+    )]
+    assert os.path.exists(meta['files'][0]['gltf'])
+    assert os.path.exists(meta['files'][0]['legend'])
