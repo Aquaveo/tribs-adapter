@@ -43,6 +43,9 @@ def main(
             if file.endswith(".reach"):
                 reach_path = os.path.join(tin_temp_dir.name, file)
 
+        if reach_path is None:
+            raise RuntimeError("No .reach file found in the TIN dataset.")
+
         num_reach = 0
         with open(reach_path, 'r') as file:
             num_reach = sum(1 for _ in file)
