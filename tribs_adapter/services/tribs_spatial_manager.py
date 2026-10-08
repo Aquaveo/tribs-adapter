@@ -32,7 +32,7 @@ from tribs_adapter.common.dataset_types import DatasetTypes, CompoundDatasetType
 from tribs_adapter.common.czml_converters import generate_czml_for_pixel_files, generate_czml_for_mrf_and_rft_files, \
     generate_czml_for_qout_files, get_file_variables, get_output_file_variables, get_extents, get_nodes, \
     generate_czml_for_sdf_station, reproject
-from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
+from tribs_adapter.io.tribs_mesh import tRIBSMeshViz, parse_output_file_name
 
 log = logging.getLogger(__name__)
 
@@ -288,23 +288,8 @@ class TribsSpatialManager(ResourceSpatialManager):
 
         elif dataset.dataset_type == DatasetTypes.TRIBS_TIN:
             gltf_meta = self.create_tribs_tin_layer(dataset, mesh_epsg=srid)
-            gltf_files = os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf'))
-            viz_urls = [
-                os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith(self.GLTF_EXTENSIONS)
-            ]
-            legend_urls = [
-                os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.png')
-            ]
             # Override viz with gltf viz
-            viz = {
-                'type': 'gltf',
-                'url': viz_urls,
-                'origin': gltf_meta.get('origin'),
-                'extent': gltf_meta.get('extents'),
-                'legend': legend_urls,
-            }
+            viz = self._build_gltf_viz(dataset, gltf_meta)
 
         elif dataset.dataset_type == DatasetTypes.TRIBS_METIS:
             fs = [
@@ -316,27 +301,26 @@ class TribsSpatialManager(ResourceSpatialManager):
         elif dataset.dataset_type in GltfOutputDatasetTypes:
             # find the tribs_tin dataset that is linked to this dataset
             from tribs_adapter.resources import Dataset
+            if not dataset.linked_realizations:
+                raise ValueError(
+                    f'Visualizing a {dataset.dataset_type} dataset requires a linked Realization '
+                    f'(dataset {dataset.id}).'
+                )
             linked_realization = dataset.linked_realizations[0]
             output_node_file = linked_realization.input_file.files_and_pathnames.mesh_generation.INPUTDATAFILE
             node_file_dataset = session.query(Dataset).get(str(output_node_file.resource_id))
             gltf_meta = self.create_tribs_tin_layer(node_file_dataset, mesh_epsg=srid, output_dataset=dataset)
-            gltf_files = os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf'))
-            viz_urls = [
-                os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith(self.GLTF_EXTENSIONS)
-            ]
-            legend_urls = [
-                os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.png')
-            ]
+            # Time axis of the spatial output: STARTDATE anchors the hours parsed from the output file names, and
+            # SPOPINTRVL (spatial output interval) is the fallback step when there is a single output file.
+            time_variables = linked_realization.input_file.run_parameters.time_variables
+            start_date = time_variables.STARTDATE
+            if not isinstance(start_date, datetime.datetime):
+                log.warning(f'Could not parse STARTDATE ({start_date!r}) of realization {linked_realization.id}.')
+                start_date = None
             # Override viz with gltf viz
-            viz = {
-                'type': 'gltf',
-                'url': viz_urls,
-                'origin': gltf_meta.get('origin'),
-                'extent': gltf_meta.get('extents'),
-                'legend': legend_urls,
-            }
+            viz = self._build_gltf_viz(
+                dataset, gltf_meta, start_date=start_date, fallback_step_hours=time_variables.SPOPINTRVL
+            )
 
         elif dataset.dataset_type in [
             DatasetTypes.TRIBS_OUT_PIXEL,
@@ -850,7 +834,96 @@ class TribsSpatialManager(ResourceSpatialManager):
             return False
         name = os.path.basename(path)
         companions = ('.json', '.png', '_voi', '_area', '_reach', '_width') + TribsSpatialManager.GLTF_EXTENSIONS
-        return not name.endswith(companions)
+        return not name.endswith(companions) and parse_output_file_name(name) is not None
+
+    @staticmethod
+    def _build_gltf_variables(files, url_dir, start_date=None, fallback_step_hours=None):
+        """Group the glTF files written by ``tRIBSMeshViz.to_gltf`` into per-variable time series.
+
+        Args:
+            files(list): The ``files`` entries of the metadata returned by ``tRIBSMeshViz.to_gltf``.
+            url_dir(str): Media-relative directory of the glTF files (``<file_database_id>/<file_collection_id>/gltf``).
+            start_date(datetime.datetime): Simulation start (STARTDATE). The hours of each time step are added to it.
+                When None, the ``time``, ``start`` and ``end`` fields are None and only ``hours`` is populated.
+            fallback_step_hours(float): Time step (hours) to report when it cannot be derived from the files, i.e.
+                when a variable has a single time step (SPOPINTRVL).
+
+        Returns:
+            list: One entry per variable, in the order the variables were first written::
+
+                {'name': 'Mu', 'start': '2004-06-01T00:00:00Z', 'end': '2004-06-02T16:00:00Z', 'step_hours': 10,
+                 'timesteps': [{'hours': 0, 'time': '2004-06-01T00:00:00Z', 'url': '<url_dir>/..._Mu.glb',
+                                'legend': '<url_dir>/..._Mu_legend.png' or None}, ...]}
+
+            Time steps are sorted by hours. A static variable (bare mesh, ``hours`` None) has ``start``, ``end`` and
+            ``step_hours`` None. The result is JSON serializable.
+        """
+        def to_url(path):
+            return os.path.join(url_dir, os.path.basename(path)) if path else None
+
+        def to_time(hours):
+            if start_date is None or hours is None:
+                return None
+            return (start_date + datetime.timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        grouped = {}
+        for entry in files:
+            grouped.setdefault(entry['variable'], []).append(entry)
+
+        variables = []
+        for name, entries in grouped.items():
+            entries = sorted(entries, key=lambda e: (e['hours'] is None, e['hours'] if e['hours'] is not None else 0))
+            timesteps = [
+                dict(hours=e['hours'], time=to_time(e['hours']), url=to_url(e['gltf']), legend=to_url(e['legend']))
+                for e in entries
+            ]
+            hours = [t['hours'] for t in timesteps if t['hours'] is not None]
+            diffs = [b - a for a, b in zip(hours, hours[1:]) if b - a > 0]
+            if diffs:
+                step_hours = min(diffs)
+            elif hours and fallback_step_hours:
+                step_hours = fallback_step_hours
+            else:
+                step_hours = None
+            variables.append(dict(
+                name=name,
+                start=timesteps[0]['time'],
+                end=timesteps[-1]['time'],
+                step_hours=step_hours,
+                timesteps=timesteps,
+            ))
+        return variables
+
+    @classmethod
+    def _build_gltf_viz(cls, dataset, gltf_meta, start_date=None, fallback_step_hours=None):
+        """Build the ``viz`` attribute of a dataset visualized with glTF files.
+
+        Args:
+            dataset(tribs_adapter.resources.dataset.Dataset): Dataset that holds the ``gltf`` directory.
+            gltf_meta(dict): Metadata returned by ``tRIBSMeshViz.to_gltf`` (via ``create_tribs_tin_layer``).
+            start_date(datetime.datetime): See ``_build_gltf_variables``.
+            fallback_step_hours(float): See ``_build_gltf_variables``.
+
+        Returns:
+            dict: ``{'type': 'gltf', 'url': [...], 'legend': [...], 'origin': [...], 'extent': [...],
+            'variables': [...]}``. ``url`` and ``legend`` are the flat, sorted lists of every glTF and legend file
+            (kept for backwards compatibility); ``variables`` is the structured per-variable time series.
+        """
+        url_dir = os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf')
+        gltf_files = sorted(os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf')))
+        viz_urls = [os.path.join(url_dir, f) for f in gltf_files if f.endswith(cls.GLTF_EXTENSIONS)]
+        legend_urls = [os.path.join(url_dir, f) for f in gltf_files if f.endswith('.png')]
+        variables = cls._build_gltf_variables(
+            gltf_meta.get('files', []), url_dir, start_date=start_date, fallback_step_hours=fallback_step_hours
+        )
+        return {
+            'type': 'gltf',
+            'url': viz_urls,
+            'origin': gltf_meta.get('origin'),
+            'extent': gltf_meta.get('extents'),
+            'legend': legend_urls,
+            'variables': variables,
+        }
 
     @staticmethod
     def _find_voi_file(mesh_file, output_collection_path=None):
