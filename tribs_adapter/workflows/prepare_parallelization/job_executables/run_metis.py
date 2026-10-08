@@ -11,7 +11,8 @@ import os
 import tempfile
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, MultiPolygon, GeometryCollection
+from shapely.ops import unary_union
 from shapely.validation import make_valid
 
 import xms.tool_tribs.tribs.run_meshbuilder_and_metis_tool as rmm
@@ -101,22 +102,31 @@ def voronoi_to_shapefile(voronoi_path, reach_file_path, shp_path, epsg=32613, no
     df_reach = pd.read_csv(reach_file_path, delimiter=' ', names=['proc_id', 'reach_id'])
     gdf = gdf.merge(df_reach)
 
-    # Define raster resolution
-    def repair_geometry(geom):
-        # Try make_valid first (shapely ≥ 2.0)
-        fixed = make_valid(geom)
-        if fixed.is_valid:
-            return fixed
-        # If still invalid, try buffer(0) as fallback
-        fixed = geom.buffer(0)
-        if fixed.is_valid:
-            return fixed
-        # If still invalid, return None (we can drop later)
+    def keep_polygons(geom):
+        # Shapefile layer is POLYGON type: drop LineString/Point slivers that
+        # make_valid or dissolve can leave behind inside a GeometryCollection.
+        if geom is None or geom.is_empty:
+            return None
+        if isinstance(geom, (Polygon, MultiPolygon)):
+            return geom
+        if isinstance(geom, GeometryCollection):
+            polys = [g for g in geom.geoms if isinstance(g, (Polygon, MultiPolygon))]
+            return unary_union(polys) if polys else None
         return None
+
+    def repair_geometry(geom):
+        # Try make_valid first (shapely ≥ 2.0), fall back to buffer(0)
+        fixed = make_valid(geom)
+        if not fixed.is_valid:
+            fixed = geom.buffer(0)
+        return keep_polygons(fixed)
 
     gdf['geometry'] = gdf['geometry'].apply(repair_geometry)
     gdf = gdf[gdf["geometry"].notnull()]
     gdf = gdf.dissolve(by='proc_id').drop('reach_id', axis=1)  # the result is not perfect
+    # Dissolve can reintroduce non-polygon parts; clean again before writing
+    gdf['geometry'] = gdf['geometry'].apply(keep_polygons)
+    gdf = gdf[gdf["geometry"].notnull()]
 
     try:
         gdf.to_file(shp_path, driver='ESRI Shapefile')
