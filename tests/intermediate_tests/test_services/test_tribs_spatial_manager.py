@@ -1,3 +1,4 @@
+import datetime
 import os
 from pathlib import Path
 import requests
@@ -89,11 +90,36 @@ def test_projection_string_function(tsm, minimal_project):
 
 
 def test_create_time_dynamic_raster_layer(tsm, time_dynamic_dataset, node_file_dataset):
-    tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_dynamic_dataset)
+    meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_dynamic_dataset)
 
     dataset_path = time_dynamic_dataset.file_collection_client.path
     assert os.path.exists(os.path.join(dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 228
+    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 224
+    assert len(meta['files']) == 112
+
+    # The viz attribute groups the glTF files into per-variable time series and survives JSON serialization
+    viz = tsm._build_gltf_viz(
+        time_dynamic_dataset, meta, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=10
+    )
+    assert viz['type'] == 'gltf'
+    assert len(viz['url']) == 112 and len(viz['legend']) == 112
+    assert viz['url'] == sorted(viz['url'])
+    url_dir = os.path.join(
+        str(time_dynamic_dataset.file_collection.file_database_id), str(time_dynamic_dataset.file_collection.id), 'gltf'
+    )
+    assert all(u.startswith(url_dir) for u in viz['url'])
+    variables = {v['name']: v for v in viz['variables']}
+    assert 'ID' not in variables
+    assert 'VegFraction' in variables  # header padded with spaces in the fixture
+    z = variables['Z']
+    assert [t['hours'] for t in z['timesteps']] == [0, 10]
+    assert z['step_hours'] == 10
+    assert z['start'] == '2004-06-01T00:00:00Z' and z['end'] == '2004-06-01T10:00:00Z'
+    assert z['timesteps'][0]['url'] in viz['url'] and z['timesteps'][0]['legend'] in viz['legend']
+
+    time_dynamic_dataset.set_attribute('viz', viz)
+    serialized = time_dynamic_dataset.serialize()
+    assert serialized['viz']['variables'] == viz['variables']
 
     tsm.delete_tribs_tin_layer(time_dynamic_dataset)
     assert not os.path.exists(os.path.join(dataset_path, 'gltf'))
@@ -104,7 +130,7 @@ def test_create_time_integrated_raster_layer(tsm, time_integrated_dataset, node_
 
     dataset_path = time_integrated_dataset.file_collection_client.path
     assert os.path.exists(os.path.join(dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 228
+    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 220
 
     tsm.delete_tribs_tin_layer(time_integrated_dataset)
     assert not os.path.exists(os.path.join(dataset_path, 'gltf'))
