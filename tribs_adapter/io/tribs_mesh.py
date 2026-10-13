@@ -570,6 +570,33 @@ class tRIBSMeshViz:
         """Elevation of the node of every Voronoi cell (the value used to color the bare mesh)."""
         return [float(z) for z in self.nodes[self.voronoi['ids'], 2]]
 
+    def _output_file_variables(self, output_file: Path | str, output_variables: list = None) -> list:
+        """Variables to visualize from an output file: the given ones, or every non-ID column of the file."""
+        if output_variables is not None:
+            return list(output_variables)
+        return [v for v in self.data[output_file].keys() if v not in self.NON_VARIABLE_COLUMNS]
+
+    def _variable_value_ranges(self, output_variables: list = None) -> dict:
+        """Minimum and maximum of each output variable over the Voronoi cells of every output file.
+
+        Returns:
+            ``{variable: (min, max)}``. Variables without a single value (or missing from every file) are left out.
+        """
+        ranges = {}
+        for output_file in self.output_files:
+            for variable in self._output_file_variables(output_file, output_variables):
+                cell_values = self._cell_values(output_file, variable)
+                if cell_values is None:
+                    continue
+                values = np.array([v for v in cell_values if v is not None], dtype=np.float64)
+                if len(values) == 0:
+                    continue
+                low, high = float(values.min()), float(values.max())
+                if variable in ranges:
+                    low, high = min(low, ranges[variable][0]), max(high, ranges[variable][1])
+                ranges[variable] = (low, high)
+        return ranges
+
     def _cell_values(self, output_file: Path | str, output_variable: str) -> list | None:
         """Look up the value of an output variable for every Voronoi cell, joined by node ID.
 
@@ -634,7 +661,7 @@ class tRIBSMeshViz:
                     'extents': [min_x, min_y, max_x, max_y],
                     'files': [
                         {'variable': 'Mu', 'output_file': '/out/salas.0010_00d', 'hours': 10, 'kind': 'd',
-                         'gltf': '/path/to/out_salas-0010_00d_Mu.glb', 'legend': '/path/to/..._legend.png' or None},
+                         'gltf': '/path/to/out_salas-0010_00d_Mu.glb', 'legend': '/path/to/out_Mu_legend.png' or None},
                         ...
                     ],
                 }
@@ -642,6 +669,10 @@ class tRIBSMeshViz:
             ``files`` has one entry per glTF written, in the order they were written. For the bare mesh (no output
             files) the single entry has ``variable='Elevation'`` and ``output_file``, ``hours`` and ``kind`` set to
             None.
+
+            The colors of an output variable are scaled to its minimum and maximum over all output files, so the
+            same value has the same color in every time step and one legend (``<gltf_path>_<variable>_legend.png``)
+            serves all of a variable's time steps. The bare mesh is scaled to its own elevation range.
         """
         self.data  # Ensure data is loaded
         generated_gltfs = []
@@ -691,20 +722,19 @@ class tRIBSMeshViz:
                 gltf=str(gltf_file_path), legend=legend_path,
             ))
         else:
+            # Colors are scaled per variable over every output file (time step), not per file, so values keep the
+            # same color as the time steps animate and one legend serves the whole series.
+            value_ranges = self._variable_value_ranges(output_variables)
             for output_file in self.output_files:  # Get the file basename and clean out special characters
                 basefile_name = os.path.basename(output_file).replace('.', '-')
                 time_stamp = parse_output_file_name(output_file)
                 if time_stamp is None:
                     log.warning(f"Could not parse a time stamp out of output file name: {output_file}")
-                if output_variables is not None:
-                    file_variables = output_variables
-                else:
-                    file_variables = [v for v in self.data[output_file].keys() if v not in self.NON_VARIABLE_COLUMNS]
-                for variable in file_variables:
+                for variable in self._output_file_variables(output_file, output_variables):
                     gltf_file_path = Path(f'{gltf_path}_{basefile_name}_{variable}{extension}')
-                    gltf, variable_data = self._build_voronoi_gltf(
+                    gltf, _ = self._build_voronoi_gltf(
                         localized_cells, cell_normals, output_file, variable, color_ramp_file=color_ramp_file,
-                        binary=binary,
+                        binary=binary, value_range=value_ranges.get(variable),
                     )
                     if gltf is not None:
                         gltf = self._set_materials(gltf)
@@ -712,18 +742,26 @@ class tRIBSMeshViz:
                         log.debug("Saving glTF file...")
                         gltf.save(str(gltf_file_path))
                         generated_gltfs.append(gltf)
-                        legend_path = None
-                        if generate_legend:
-                            legend_path = str(gltf_file_path)[:-len(extension)] + '_legend.png'
-                            self._generate_legend_for_values(variable_data, legend_path, color_ramp_file)
                         generated_files.append(dict(
                             variable=variable,
                             output_file=str(output_file),
                             hours=time_stamp['total_hours'] if time_stamp else None,
                             kind=time_stamp['kind'] if time_stamp else None,
                             gltf=str(gltf_file_path),
-                            legend=legend_path,
+                            legend=None,
                         ))
+
+            if generate_legend:  # One legend per variable, spanning its range over all time steps
+                for variable in dict.fromkeys(f['variable'] for f in generated_files):
+                    legend_path = f'{gltf_path}_{variable}_legend.png'
+                    if variable not in value_ranges:
+                        log.warning(f"No values to generate a legend from. Skipping legend: {legend_path}")
+                        continue
+                    log.debug(f"Generating legend: {legend_path}")
+                    self._generate_legend(*value_ranges[variable], legend_path, color_ramp_file)
+                    for entry in generated_files:
+                        if entry['variable'] == variable:
+                            entry['legend'] = legend_path
 
         separator()
         log.info(f"Successfully created glTF: {str(gltf_path)}")
@@ -989,13 +1027,14 @@ class tRIBSMeshViz:
 
         return [ncx, ncy, ncz], [scx, scy, scz]
 
-    def _values_to_texcoords(self, values) -> np.ndarray:
+    def _values_to_texcoords(self, values, value_range: tuple = None) -> np.ndarray:
         """Convert raw values (None for no value) to texture coordinates into the color ramp image.
 
         The color ramps are 256x256 images whose colors vary along the v (row) axis in the u=0 column and are fully
         transparent in the u=1 column, so a value maps to (0, normalized value) and "no value" maps to (1, 1).
+        ``value_range`` is the (min, max) the values are normalized to; defaults to the range of the values.
         """
-        normalized = self._interpolate_array(values)
+        normalized = self._interpolate_array(values, value_range=value_range)
         return np.array([[0.0, x] if x is not None else [1.0, 1.0] for x in normalized], dtype=np.float32)
 
     def _build_voronoi_gltf(
@@ -1007,6 +1046,7 @@ class tRIBSMeshViz:
         color_ramp_file: Path | str = None,  # Must be 256x256
         binary: bool = True,
         cell_values: list = None,
+        value_range: tuple = None,
     ) -> tuple[pygltflib.GLTF2 | None, list | None]:
         """Build glTF mesh of the Voronoi cells, each cell uniformly colored by one value.
 
@@ -1019,6 +1059,8 @@ class tRIBSMeshViz:
             binary: Prepare a binary glTF (.glb).
             cell_values: One value per cell in ``self.voronoi['ids']`` (None for no value). Used instead of an output
                 file, e.g. the node elevations for the bare mesh.
+            value_range: (min, max) the values are colored against, e.g. the range of the variable over all time
+                steps. Defaults to the range of the values in this file.
 
         Returns:
             glTF object and the list of raw cell values (None for cells without a value), or (None, None) if the
@@ -1032,7 +1074,7 @@ class tRIBSMeshViz:
                 return None, None
 
         geometry = self._build_voronoi_geometry()
-        cell_texcoords = self._values_to_texcoords(cell_values)
+        cell_texcoords = self._values_to_texcoords(cell_values, value_range=value_range)
         vertex_texcoords = cell_texcoords[geometry['vertex_cell']]
         gltf = self._assemble_gltf(
             positions, geometry['triangles'], normals, vertex_texcoords, color_ramp_file, binary=binary
@@ -1223,19 +1265,25 @@ class tRIBSMeshViz:
         log.debug(f"Materials after: {gltf.materials}")
         return gltf
 
-    def _interpolate_array(self, arr):
-        """Interpolate array values."""
+    def _interpolate_array(self, arr, value_range: tuple = None):
+        """Normalize values to [0, 1] over ``value_range`` (min, max), or over the values themselves when not given.
+
+        None values stay None. Values outside of ``value_range`` are clipped.
+        """
         arr = np.array(arr)
         arr = np.where(arr == None, np.nan, arr).astype(np.float64)  # NOQA: E711 - arr is None does not work here.
-        min_val = np.nanmin(arr)
-        max_val = np.nanmax(arr)
+        if value_range is None:
+            min_val = np.nanmin(arr)
+            max_val = np.nanmax(arr)
+        else:
+            min_val, max_val = value_range
 
         range_val = max_val - min_val
         if range_val == 0:  # Prevent division by zero: constant values all map to the bottom of the ramp
             result = np.zeros_like(arr, dtype=np.float64)
             result[np.isnan(arr)] = np.nan
         else:
-            result = (arr - min_val) / range_val
+            result = np.clip((arr - min_val) / range_val, 0.0, 1.0)
         result = [x if not np.isnan(x) else None for x in result]  # Replace NaN values with None in the final array
         return result
 

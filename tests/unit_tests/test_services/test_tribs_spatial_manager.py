@@ -146,5 +146,6 @@ def test_build_gltf_variables_from_mesh_output(files_dir, tmp_path):
     assert s['start'] == '2004-06-01T00:00:00Z'
     assert s['end'] == '2004-06-02T16:00:00Z'
     assert s['timesteps'][0]['url'] == 'fdb/fc/gltf/abc-salas_salas-0000_00d_S.glb'
-    assert s['timesteps'][0]['legend'] == 'fdb/fc/gltf/abc-salas_salas-0000_00d_S_legend.png'
+    # One legend per variable, scaled over all time steps and shared by every time step
+    assert all(t['legend'] == 'fdb/fc/gltf/abc-salas_S_legend.png' for t in s['timesteps'])
     assert all(os.path.exists(tmp_path / os.path.basename(t['url'])) for t in s['timesteps'])
