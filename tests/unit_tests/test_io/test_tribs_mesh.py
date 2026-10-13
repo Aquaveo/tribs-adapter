@@ -323,7 +323,7 @@ def test_voronoi_gltf_values_join_by_id(tmv_factory):
 
     gltf_file = f'{gltf_file_base_name}_salas-0700_00d_ID.glb'
     assert os.path.exists(gltf_file)
-    assert os.path.exists(f'{gltf_file_base_name}_salas-0700_00d_ID_legend.png')
+    assert os.path.exists(f'{gltf_file_base_name}_ID_legend.png')
 
     triangles, positions, normals, texcoords = _read_gltf_accessors(gltf_file)
     geometry = tmv._build_voronoi_geometry()
@@ -376,6 +376,44 @@ def test_interpolate_array(tmv_factory):
     assert tmv._interpolate_array([1.0, 3.0, None, 2.0]) == [0.0, 1.0, None, 0.5]
     # Constant values map to the bottom of the ramp and keep the missing values
     assert tmv._interpolate_array([5.0, 5.0, None]) == [0.0, 0.0, None]
+    # An explicit range (e.g. of the variable over all time steps) is used instead of the range of the values, and
+    # values outside of it are clipped
+    assert tmv._interpolate_array([1.0, 3.0, None, 2.0], value_range=(0.0, 4.0)) == [0.25, 0.75, None, 0.5]
+    assert tmv._interpolate_array([-1.0, 9.0], value_range=(0.0, 4.0)) == [0.0, 1.0]
+    assert tmv._interpolate_array([5.0, None], value_range=(5.0, 5.0)) == [0.0, None]
+
+
+def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory):
+    """A variable's colors and legend span its range over every output file, not the range of each file."""
+    output_dir = tempfile.mkdtemp()
+    with open(os.path.join(output_dir, 'scaled.0000_00d'), 'w') as f:
+        f.write("ID,Foo\n0,10\n1,20\n")  # file range 10..20
+    with open(os.path.join(output_dir, 'scaled.0010_00d'), 'w') as f:
+        f.write("ID,Foo\n0,20\n1,40\n")  # file range 20..40 -> variable range 10..40
+
+    mesh_basename = 'salas_outputs'
+    tmv = tmv_factory(mesh_basename, '32613')
+    tmv.output_files = [os.path.join(output_dir, 'scaled.0000_00d'), os.path.join(output_dir, 'scaled.0010_00d')]
+    assert tmv._variable_value_ranges(['Foo']) == {'Foo': (10.0, 40.0)}
+    assert tmv._variable_value_ranges() == {'Foo': (10.0, 40.0)}  # ID is not a variable
+    assert tmv._variable_value_ranges(['Missing']) == {}
+
+    base = os.path.join(tempfile.mkdtemp(), mesh_basename)
+    meta = tmv.to_gltf(base, '32613', output_variables=['Foo'], generate_legend=True)
+
+    # One legend for the whole series, shared by every time step
+    assert [f['legend'] for f in meta['files']] == [f'{base}_Foo_legend.png'] * 2
+    assert os.path.exists(f'{base}_Foo_legend.png')
+    assert not os.path.exists(f'{base}_scaled-0000_00d_Foo_legend.png')
+
+    # Normalized value == (value - 10) / (40 - 10) in both files, by cell (node)
+    geometry = tmv._build_voronoi_geometry()
+    first_vertex = np.r_[0, np.cumsum(np.bincount(geometry['vertex_cell']))[:-1]]
+    for entry, expected in zip(meta['files'], [[0.0, 1 / 3], [1 / 3, 1.0]]):
+        _, _, _, texcoords = _read_gltf_accessors(entry['gltf'])
+        cell_uv = texcoords[first_vertex]
+        np.testing.assert_allclose(cell_uv[:2], [[0.0, expected[0]], [0.0, expected[1]]], atol=1e-6)
+        assert (cell_uv[2:] == 1.0).all()  # Cells without a value stay transparent
 
 
 def test_generate_legend_for_values(tmv_factory, files_dir, tmp_path, caplog):
@@ -451,7 +489,7 @@ def test_glb_output(tmv_factory, files_dir):
     glb_file = f'{base}_salas-0700_00d_S.glb'
     gltf_file = f'{base}_salas-0700_00d_S.gltf'
     assert os.path.exists(glb_file) and os.path.exists(gltf_file)
-    assert os.path.exists(f'{base}_salas-0700_00d_S_legend.png')
+    assert os.path.exists(f'{base}_S_legend.png')
 
     with open(glb_file, 'rb') as f:
         assert f.read(4) == b'glTF'
