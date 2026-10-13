@@ -5,7 +5,7 @@ import pytest
 
 from tribs_adapter.workflows.utilities import (
     get_gmt_offset, safe_str, get_condor_fdb_root, get_condor_proj_dir, get_geoserver_ports, get_gdal_data_dirs,
-    get_condor_env
+    get_mpl_config_dir, get_condor_env
 )
 
 
@@ -89,6 +89,16 @@ def test_get_gdal_data_dirs():
             'GDAL_DATA': "/some/path/gdal",
             'GDAL_DRIVER_PATH': "/some/path/gdalplugins"
         }
+
+
+def test_get_mpl_config_dir():
+    with mock.patch.dict('os.environ', {}, clear=True):
+        assert get_mpl_config_dir(debug=True) == {'MPLCONFIGDIR': '/tmp/matplotlib'}
+        assert get_mpl_config_dir(debug=False) == {'MPLCONFIGDIR': '/tmp/matplotlib'}
+
+    with mock.patch.dict('os.environ', {'CONDOR_MPLCONFIGDIR': '/some/path/mpl'}, clear=True):
+        assert get_mpl_config_dir(debug=True) == {'MPLCONFIGDIR': '/some/path/mpl'}
+        assert get_mpl_config_dir(debug=False) == {'MPLCONFIGDIR': '/some/path/mpl'}
 
 
 def test_get_geoserver_ports():

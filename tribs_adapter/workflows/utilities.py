@@ -102,6 +102,13 @@ def get_gdal_data_dirs(debug=False):
     return {'GDAL_DATA': gdal_data_path, 'GDAL_DRIVER_PATH': gdal_driver_path}
 
 
+def get_mpl_config_dir(debug=False):
+    """This function should only be called in an app-available environment (don't call in job scripts)."""
+    # Condor jobs run with HOME=/nonexistent, so matplotlib can't create its default config/cache dir.
+    dir = os.environ.get('CONDOR_MPLCONFIGDIR', '/tmp/matplotlib')
+    return {'MPLCONFIGDIR': dir}
+
+
 def get_geoserver_ports(debug=False):
     return os.environ.get('GEOSERVER_CLUSTER_PORTS')
 
@@ -118,6 +125,7 @@ def get_condor_env():
     }
     job_env.update(get_gdal_data_dirs(debug))
     job_env.update(get_condor_proj_dir(debug))
+    job_env.update(get_mpl_config_dir(debug))
     job_env_str = ';'.join([f'{k}={v}' for k, v in job_env.items()])
     return job_env_str
 
