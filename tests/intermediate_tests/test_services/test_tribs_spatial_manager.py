@@ -94,7 +94,9 @@ def test_create_time_dynamic_raster_layer(tsm, time_dynamic_dataset, node_file_d
 
     dataset_path = time_dynamic_dataset.file_collection_client.path
     assert os.path.exists(os.path.join(dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 224
+    gltf_files = os.listdir(os.path.join(dataset_path, 'gltf'))
+    assert len([f for f in gltf_files if f.endswith('.glb')]) == 112
+    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 57  # one legend per variable
     assert len(meta['files']) == 112
 
     # The viz attribute groups the glTF files into per-variable time series and survives JSON serialization
@@ -102,7 +104,7 @@ def test_create_time_dynamic_raster_layer(tsm, time_dynamic_dataset, node_file_d
         time_dynamic_dataset, meta, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=10
     )
     assert viz['type'] == 'gltf'
-    assert len(viz['url']) == 112 and len(viz['legend']) == 112
+    assert len(viz['url']) == 112 and len(viz['legend']) == 57
     assert viz['url'] == sorted(viz['url'])
     url_dir = os.path.join(
         str(time_dynamic_dataset.file_collection.file_database_id), str(time_dynamic_dataset.file_collection.id), 'gltf'
@@ -130,7 +132,9 @@ def test_create_time_integrated_raster_layer(tsm, time_integrated_dataset, node_
 
     dataset_path = time_integrated_dataset.file_collection_client.path
     assert os.path.exists(os.path.join(dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 220
+    gltf_files = os.listdir(os.path.join(dataset_path, 'gltf'))
+    assert len([f for f in gltf_files if f.endswith('.glb')]) == 110
+    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 55  # one legend per variable
 
     tsm.delete_tribs_tin_layer(time_integrated_dataset)
     assert not os.path.exists(os.path.join(dataset_path, 'gltf'))
@@ -151,12 +155,16 @@ def test_create_tribs_tin_layer(tsm, tin_dataset, tin_dataset_empty, tin_output_
 
     tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'Z'])
     assert os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(tin_output_dataset_path, 'gltf'))) == 20
+    gltf_files = os.listdir(os.path.join(tin_output_dataset_path, 'gltf'))
+    assert len([f for f in gltf_files if f.endswith('.glb')]) == 10
+    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 2  # one legend per variable (S, Z)
 
     # Check again to make sure it doesn't add MORE files
     tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'Z'])
     assert os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(tin_output_dataset_path, 'gltf'))) == 20
+    gltf_files = os.listdir(os.path.join(tin_output_dataset_path, 'gltf'))
+    assert len([f for f in gltf_files if f.endswith('.glb')]) == 10
+    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 2  # one legend per variable (S, Z)
 
     tsm.delete_tribs_tin_layer(tin_output_dataset)
     assert not os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))
