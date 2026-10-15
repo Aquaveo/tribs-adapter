@@ -32,7 +32,7 @@ from tribs_adapter.common.dataset_types import DatasetTypes, CompoundDatasetType
 from tribs_adapter.common.czml_converters import generate_czml_for_pixel_files, generate_czml_for_mrf_and_rft_files, \
     generate_czml_for_qout_files, get_file_variables, get_output_file_variables, get_extents, get_nodes, \
     generate_czml_for_sdf_station, reproject
-from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
+from tribs_adapter.io.tribs_mesh import tRIBSMeshViz, parse_output_file_name
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,8 @@ class TribsSpatialManager(ResourceSpatialManager):
     WORKSPACE = 'tribs'
     URI = 'http://portal.aquaveo.com/tribs'
     SLD_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'templates', 'sld_templates')
+    # glTF files written by tRIBSMeshViz: binary (.glb, current) and JSON (.gltf, older datasets)
+    GLTF_EXTENSIONS = (tRIBSMeshViz.GLB_EXTENSION, tRIBSMeshViz.GLTF_EXTENSION)
     S_RASTER = 'raster'  # built-in style in geoserver
     S_RASTER_CONT = 'raster_continuous'
     S_RASTER_DISC = 'raster_discrete'
@@ -93,10 +95,26 @@ class TribsSpatialManager(ResourceSpatialManager):
     }
 
     # Override parent class GEOSERVER_CLUSTER_PORTS attribute with local environment var
-    try:
-        GEOSERVER_CLUSTER_PORTS = json.loads(os.environ.get("GEOSERVER_CLUSTER_PORTS"))
-    except (json.JSONDecodeError, TypeError):
-        GEOSERVER_CLUSTER_PORTS = [8081, 8082, 8083, 8084]
+    @staticmethod
+    def _parse_cluster_ports(value, default=(8081, 8082, 8083, 8084)):
+        """Parse the GEOSERVER_CLUSTER_PORTS environment value (a JSON list of ints, e.g. "[8080]").
+
+        Tolerates a single port ("8080") and an extra level of quoting ('"[8080]"') that some env loaders leave in
+        place; anything else falls back to the default ports.
+        """
+        try:
+            ports = json.loads(value)
+            if isinstance(ports, str):  # e.g. '"[8080]"' -> '[8080]'
+                ports = json.loads(ports)
+            if isinstance(ports, int):
+                ports = [ports]
+            ports = [int(p) for p in ports]
+        except (json.JSONDecodeError, TypeError, ValueError):
+            log.warning(f'Invalid GEOSERVER_CLUSTER_PORTS value {value!r}. Using default ports {list(default)}.')
+            return list(default)
+        return ports
+
+    GEOSERVER_CLUSTER_PORTS = _parse_cluster_ports(os.environ.get("GEOSERVER_CLUSTER_PORTS"))
     log.debug(f"GEOSERVER_CLUSTER_PORTS set to {GEOSERVER_CLUSTER_PORTS}")
 
     def __init__(self, geoserver_engine, reload_ports=GEOSERVER_CLUSTER_PORTS):
@@ -270,23 +288,8 @@ class TribsSpatialManager(ResourceSpatialManager):
 
         elif dataset.dataset_type == DatasetTypes.TRIBS_TIN:
             gltf_meta = self.create_tribs_tin_layer(dataset, mesh_epsg=srid)
-            gltf_files = os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf'))
-            viz_urls = [
-                os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.gltf')
-            ]
-            legend_urls = [
-                os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.png')
-            ]
             # Override viz with gltf viz
-            viz = {
-                'type': 'gltf',
-                'url': viz_urls,
-                'origin': gltf_meta.get('origin'),
-                'extent': gltf_meta.get('extents'),
-                'legend': legend_urls,
-            }
+            viz = self._build_gltf_viz(dataset, gltf_meta)
 
         elif dataset.dataset_type == DatasetTypes.TRIBS_METIS:
             fs = [
@@ -298,27 +301,26 @@ class TribsSpatialManager(ResourceSpatialManager):
         elif dataset.dataset_type in GltfOutputDatasetTypes:
             # find the tribs_tin dataset that is linked to this dataset
             from tribs_adapter.resources import Dataset
+            if not dataset.linked_realizations:
+                raise ValueError(
+                    f'Visualizing a {dataset.dataset_type} dataset requires a linked Realization '
+                    f'(dataset {dataset.id}).'
+                )
             linked_realization = dataset.linked_realizations[0]
             output_node_file = linked_realization.input_file.files_and_pathnames.mesh_generation.INPUTDATAFILE
             node_file_dataset = session.query(Dataset).get(str(output_node_file.resource_id))
             gltf_meta = self.create_tribs_tin_layer(node_file_dataset, mesh_epsg=srid, output_dataset=dataset)
-            gltf_files = os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf'))
-            viz_urls = [
-                os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.gltf')
-            ]
-            legend_urls = [
-                os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf', f)
-                for f in gltf_files if f.endswith('.png')
-            ]
+            # Time axis of the spatial output: STARTDATE anchors the hours parsed from the output file names, and
+            # SPOPINTRVL (spatial output interval) is the fallback step when there is a single output file.
+            time_variables = linked_realization.input_file.run_parameters.time_variables
+            start_date = time_variables.STARTDATE
+            if not isinstance(start_date, datetime.datetime):
+                log.warning(f'Could not parse STARTDATE ({start_date!r}) of realization {linked_realization.id}.')
+                start_date = None
             # Override viz with gltf viz
-            viz = {
-                'type': 'gltf',
-                'url': viz_urls,
-                'origin': gltf_meta.get('origin'),
-                'extent': gltf_meta.get('extents'),
-                'legend': legend_urls,
-            }
+            viz = self._build_gltf_viz(
+                dataset, gltf_meta, start_date=start_date, fallback_step_hours=time_variables.SPOPINTRVL
+            )
 
         elif dataset.dataset_type in [
             DatasetTypes.TRIBS_OUT_PIXEL,
@@ -760,7 +762,7 @@ class TribsSpatialManager(ResourceSpatialManager):
 
     def create_tribs_tin_layer(self, dataset, mesh_epsg, output_dataset=None, output_variables=None):
         """
-        Create a GeoServer raster layer for a project.
+        Write the glTF visualization (Voronoi cells draped on the TIN) for a tRIBS mesh dataset.
 
         Args:
             dataset(tribs_adapter.resources.dataset.Dataset): Dataset instance.
@@ -797,11 +799,15 @@ class TribsSpatialManager(ResourceSpatialManager):
             output_collection_path = output_dataset.file_collection_client.path
             output_files = [
                 os.path.join(output_collection_path, f) for f in os.listdir(output_collection_path)
-                if not f.endswith('.json') and os.path.isfile(os.path.join(output_collection_path, f))
+                if self._is_tribs_variable_output_file(os.path.join(output_collection_path, f))
             ]
 
+        # Find the tRIBS Voronoi polygon file (_voi) that goes with the mesh, if there is one. Output variables are
+        # rendered on the Voronoi cells, which are computed from the TIN when no _voi file is available.
+        voi_file = self._find_voi_file(mesh_file, output_collection_path)
+
         # Create the gltf
-        tribs_mesh = tRIBSMeshViz(mesh_file, mesh_epsg=mesh_epsg, output_files=output_files)
+        tribs_mesh = tRIBSMeshViz(mesh_file, mesh_epsg=mesh_epsg, output_files=output_files, voi_file=voi_file)
         meta = tribs_mesh.to_gltf(
             gltf_out_path, to_epsg=mesh_epsg, output_variables=output_variables, generate_legend=True
         )
@@ -820,6 +826,128 @@ class TribsSpatialManager(ResourceSpatialManager):
         # Add the gltf to the dataset
         dataset_to_add_to.file_collection_client.add_item(gltf_path)
         return meta
+
+    @staticmethod
+    def _is_tribs_variable_output_file(path):
+        """Whether the given file is a tRIBS spatial variable output file (_00d/_00i) rather than a companion file."""
+        if not os.path.isfile(path):
+            return False
+        name = os.path.basename(path)
+        companions = ('.json', '.png', '_voi', '_area', '_reach', '_width') + TribsSpatialManager.GLTF_EXTENSIONS
+        return not name.endswith(companions) and parse_output_file_name(name) is not None
+
+    @staticmethod
+    def _build_gltf_variables(files, url_dir, start_date=None, fallback_step_hours=None):
+        """Group the glTF files written by ``tRIBSMeshViz.to_gltf`` into per-variable time series.
+
+        Args:
+            files(list): The ``files`` entries of the metadata returned by ``tRIBSMeshViz.to_gltf``.
+            url_dir(str): Media-relative directory of the glTF files (``<file_database_id>/<file_collection_id>/gltf``).
+            start_date(datetime.datetime): Simulation start (STARTDATE). The hours of each time step are added to it.
+                When None, the ``time``, ``start`` and ``end`` fields are None and only ``hours`` is populated.
+            fallback_step_hours(float): Time step (hours) to report when it cannot be derived from the files, i.e.
+                when a variable has a single time step (SPOPINTRVL).
+
+        Returns:
+            list: One entry per variable, in the order the variables were first written::
+
+                {'name': 'Mu', 'start': '2004-06-01T00:00:00Z', 'end': '2004-06-02T16:00:00Z', 'step_hours': 10,
+                 'timesteps': [{'hours': 0, 'time': '2004-06-01T00:00:00Z', 'url': '<url_dir>/..._Mu.glb',
+                                'legend': '<url_dir>/..._Mu_legend.png' or None}, ...]}
+
+            Time steps are sorted by hours. A static variable (bare mesh, ``hours`` None) has ``start``, ``end`` and
+            ``step_hours`` None. The result is JSON serializable.
+        """
+        def to_url(path):
+            return os.path.join(url_dir, os.path.basename(path)) if path else None
+
+        def to_time(hours):
+            if start_date is None or hours is None:
+                return None
+            return (start_date + datetime.timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        grouped = {}
+        for entry in files:
+            grouped.setdefault(entry['variable'], []).append(entry)
+
+        variables = []
+        for name, entries in grouped.items():
+            entries = sorted(entries, key=lambda e: (e['hours'] is None, e['hours'] if e['hours'] is not None else 0))
+            timesteps = [
+                dict(hours=e['hours'], time=to_time(e['hours']), url=to_url(e['gltf']), legend=to_url(e['legend']))
+                for e in entries
+            ]
+            hours = [t['hours'] for t in timesteps if t['hours'] is not None]
+            diffs = [b - a for a, b in zip(hours, hours[1:]) if b - a > 0]
+            if diffs:
+                step_hours = min(diffs)
+            elif hours and fallback_step_hours:
+                step_hours = fallback_step_hours
+            else:
+                step_hours = None
+            variables.append(dict(
+                name=name,
+                start=timesteps[0]['time'],
+                end=timesteps[-1]['time'],
+                step_hours=step_hours,
+                timesteps=timesteps,
+            ))
+        return variables
+
+    @classmethod
+    def _build_gltf_viz(cls, dataset, gltf_meta, start_date=None, fallback_step_hours=None):
+        """Build the ``viz`` attribute of a dataset visualized with glTF files.
+
+        Args:
+            dataset(tribs_adapter.resources.dataset.Dataset): Dataset that holds the ``gltf`` directory.
+            gltf_meta(dict): Metadata returned by ``tRIBSMeshViz.to_gltf`` (via ``create_tribs_tin_layer``).
+            start_date(datetime.datetime): See ``_build_gltf_variables``.
+            fallback_step_hours(float): See ``_build_gltf_variables``.
+
+        Returns:
+            dict: ``{'type': 'gltf', 'url': [...], 'legend': [...], 'origin': [...], 'extent': [...],
+            'variables': [...]}``. ``url`` and ``legend`` are the flat, sorted lists of every glTF and legend file
+            (kept for backwards compatibility); ``variables`` is the structured per-variable time series.
+        """
+        url_dir = os.path.join(str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'gltf')
+        gltf_files = sorted(os.listdir(os.path.join(dataset.file_collection_client.path, 'gltf')))
+        viz_urls = [os.path.join(url_dir, f) for f in gltf_files if f.endswith(cls.GLTF_EXTENSIONS)]
+        legend_urls = [os.path.join(url_dir, f) for f in gltf_files if f.endswith('.png')]
+        variables = cls._build_gltf_variables(
+            gltf_meta.get('files', []), url_dir, start_date=start_date, fallback_step_hours=fallback_step_hours
+        )
+        return {
+            'type': 'gltf',
+            'url': viz_urls,
+            'origin': gltf_meta.get('origin'),
+            'extent': gltf_meta.get('extents'),
+            'legend': legend_urls,
+            'variables': variables,
+        }
+
+    @staticmethod
+    def _find_voi_file(mesh_file, output_collection_path=None):
+        """Find the tRIBS Voronoi polygon file (_voi) for a mesh.
+
+        Looks next to the mesh files first (``<mesh_file>_voi``), then for any ``*_voi`` file in the output dataset
+        collection (tRIBS writes the _voi file with the spatial output files).
+
+        Args:
+            mesh_file(str): Basename path of the mesh files (path without extension).
+            output_collection_path(str): Path of the output dataset file collection, if any.
+
+        Returns:
+            str: Path to the _voi file or None if none was found.
+        """
+        candidates = [f'{mesh_file}_voi']
+        if output_collection_path is not None:
+            candidates.extend(sorted(glob.glob(os.path.join(glob.escape(output_collection_path), '*_voi'))))
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                log.info(f'Using Voronoi polygon file: {candidate}')
+                return candidate
+        log.info(f'No Voronoi polygon (_voi) file found for mesh {mesh_file}.')
+        return None
 
     def create_tribs_czml_layer(self, dataset, session, files, srid):
         """
