@@ -109,6 +109,13 @@ def get_mpl_config_dir(debug=False):
     return {'MPLCONFIGDIR': dir}
 
 
+def get_numba_cache_dir(debug=False):
+    """This function should only be called in an app-available environment (don't call in job scripts)."""
+    # Condor jobs run with HOME=/nonexistent and a read-only site-packages, so numba has nowhere to write its cache.
+    dir = os.environ.get('CONDOR_NUMBA_CACHE_DIR', '/tmp/numba_cache')
+    return {'NUMBA_CACHE_DIR': dir}
+
+
 def get_geoserver_ports(debug=False):
     return os.environ.get('GEOSERVER_CLUSTER_PORTS')
 
@@ -126,6 +133,7 @@ def get_condor_env():
     job_env.update(get_gdal_data_dirs(debug))
     job_env.update(get_condor_proj_dir(debug))
     job_env.update(get_mpl_config_dir(debug))
+    job_env.update(get_numba_cache_dir(debug))
     job_env_str = ';'.join([f'{k}={v}' for k, v in job_env.items()])
     return job_env_str
 
