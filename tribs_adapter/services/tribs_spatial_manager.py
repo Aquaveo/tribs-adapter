@@ -852,11 +852,14 @@ class TribsSpatialManager(ResourceSpatialManager):
             list: One entry per variable, in the order the variables were first written::
 
                 {'name': 'Mu', 'start': '2004-06-01T00:00:00Z', 'end': '2004-06-02T16:00:00Z', 'step_hours': 10,
+                 'min': 0.1, 'max': 0.9,
                  'timesteps': [{'hours': 0, 'time': '2004-06-01T00:00:00Z', 'url': '<url_dir>/..._Mu.glb',
                                 'legend': '<url_dir>/..._Mu_legend.png' or None}, ...]}
 
             Time steps are sorted by hours. A static variable (bare mesh, ``hours`` None) has ``start``, ``end`` and
-            ``step_hours`` None. The result is JSON serializable.
+            ``step_hours`` None. ``min`` and ``max`` are the value range the variable's colors are scaled to over all
+            of its time steps (None for ``files`` entries written before the range was recorded). The result is JSON
+            serializable.
         """
         def to_url(path):
             return os.path.join(url_dir, os.path.basename(path)) if path else None
@@ -890,6 +893,8 @@ class TribsSpatialManager(ResourceSpatialManager):
                 start=timesteps[0]['time'],
                 end=timesteps[-1]['time'],
                 step_hours=step_hours,
+                min=entries[0].get('min'),
+                max=entries[0].get('max'),
                 timesteps=timesteps,
             ))
         return variables

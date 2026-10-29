@@ -116,6 +116,8 @@ def test_create_time_dynamic_raster_layer(tsm, time_dynamic_dataset, node_file_d
     z = variables['Z']
     assert [t['hours'] for t in z['timesteps']] == [0, 10]
     assert z['step_hours'] == 10
+    # The value range the colors are scaled to over all time steps, for client-drawn legends
+    assert isinstance(z['min'], float) and isinstance(z['max'], float) and z['min'] < z['max']
     assert z['start'] == '2004-06-01T00:00:00Z' and z['end'] == '2004-06-01T10:00:00Z'
     assert z['timesteps'][0]['url'] in viz['url'] and z['timesteps'][0]['legend'] in viz['legend']
 

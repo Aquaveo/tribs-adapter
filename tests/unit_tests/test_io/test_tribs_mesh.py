@@ -66,10 +66,12 @@ def test_output_files(tmv_factory):
     gltf_z_file = f'{gltf_file_base_name}_salas-0700_00d_Z.glb'
     assert os.path.exists(gltf_z_file)
     assert len(os.listdir(temp_dir)) == 1
-    # Per-file metadata: variable, time stamp parsed from the output file name, and paths
+    # Per-file metadata: variable, time stamp parsed from the output file name, paths and the color value range
+    z_min, z_max = tm._variable_value_ranges(['Z'])['Z']
+    assert z_min < z_max
     assert meta['files'] == [dict(
         variable='Z', output_file=os.path.join(tm.mesh_basename.parent, 'salas.0700_00d'), hours=700, kind='d',
-        gltf=gltf_z_file, legend=None,
+        gltf=gltf_z_file, legend=None, min=z_min, max=z_max,
     )]
 
     temp_dir_2 = tempfile.mkdtemp()
@@ -401,8 +403,9 @@ def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory):
     base = os.path.join(tempfile.mkdtemp(), mesh_basename)
     meta = tmv.to_gltf(base, '32613', output_variables=['Foo'], generate_legend=True)
 
-    # One legend for the whole series, shared by every time step
+    # One legend for the whole series, shared by every time step, and the shared range on every entry
     assert [f['legend'] for f in meta['files']] == [f'{base}_Foo_legend.png'] * 2
+    assert [(f['min'], f['max']) for f in meta['files']] == [(10.0, 40.0)] * 2
     assert os.path.exists(f'{base}_Foo_legend.png')
     assert not os.path.exists(f'{base}_scaled-0000_00d_Foo_legend.png')
 
@@ -533,6 +536,9 @@ def test_bare_mesh_renders_voronoi_cells_by_elevation(tmv_factory):
     expected = (z - z.min()) / (z.max() - z.min())
     np.testing.assert_allclose(texcoords[first_vertex, 1], expected, atol=1e-6)
     assert not (texcoords[:, 0] == 1.0).any()
+    # The elevation range the colors are scaled to is reported with the file
+    assert meta['files'][0]['variable'] == tmv.ELEVATION_VARIABLE
+    assert (meta['files'][0]['min'], meta['files'][0]['max']) == (z.min(), z.max())
 
 
 def _write_mesh(directory, name, nodes, triangles):
@@ -628,9 +634,10 @@ def test_bare_mesh_files_meta(tmv_factory):
     temp_dir = tempfile.mkdtemp()
     gltf_file_base_name = os.path.join(temp_dir, 'salas')
     meta = tmv.to_gltf(gltf_file_base_name, generate_legend=True)
+    z = tmv.nodes[tmv.voronoi['ids'], 2].astype(float)
     assert meta['files'] == [dict(
         variable='Elevation', output_file=None, hours=None, kind=None,
-        gltf=f'{gltf_file_base_name}.glb', legend=f'{gltf_file_base_name}_legend.png',
+        gltf=f'{gltf_file_base_name}.glb', legend=f'{gltf_file_base_name}_legend.png', min=z.min(), max=z.max(),
     )]
     assert os.path.exists(meta['files'][0]['gltf'])
     assert os.path.exists(meta['files'][0]['legend'])

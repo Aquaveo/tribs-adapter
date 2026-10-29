@@ -661,14 +661,16 @@ class tRIBSMeshViz:
                     'extents': [min_x, min_y, max_x, max_y],
                     'files': [
                         {'variable': 'Mu', 'output_file': '/out/salas.0010_00d', 'hours': 10, 'kind': 'd',
-                         'gltf': '/path/to/out_salas-0010_00d_Mu.glb', 'legend': '/path/to/out_Mu_legend.png' or None},
+                         'gltf': '/path/to/out_salas-0010_00d_Mu.glb', 'legend': '/path/to/out_Mu_legend.png' or None,
+                         'min': 0.1, 'max': 0.9},
                         ...
                     ],
                 }
 
             ``files`` has one entry per glTF written, in the order they were written. For the bare mesh (no output
             files) the single entry has ``variable='Elevation'`` and ``output_file``, ``hours`` and ``kind`` set to
-            None.
+            None. ``min`` and ``max`` are the value range the colors of the file are scaled to (None when the
+            variable has no values), so a client can label its own legend.
 
             The colors of an output variable are scaled to its minimum and maximum over all output files, so the
             same value has the same color in every time step and one legend (``<gltf_path>_<variable>_legend.png``)
@@ -717,9 +719,11 @@ class tRIBSMeshViz:
             if generate_legend:
                 legend_path = str(gltf_file_path)[:-len(extension)] + '_legend.png'
                 self._generate_legend_for_values(variable_data, legend_path, color_ramp_file)
+            valid_values = [x for x in variable_data if x is not None]
+            value_range = (float(min(valid_values)), float(max(valid_values))) if valid_values else (None, None)
             generated_files.append(dict(
                 variable=self.ELEVATION_VARIABLE, output_file=None, hours=None, kind=None,
-                gltf=str(gltf_file_path), legend=legend_path,
+                gltf=str(gltf_file_path), legend=legend_path, min=value_range[0], max=value_range[1],
             ))
         else:
             # Colors are scaled per variable over every output file (time step), not per file, so values keep the
@@ -742,6 +746,7 @@ class tRIBSMeshViz:
                         log.debug("Saving glTF file...")
                         gltf.save(str(gltf_file_path))
                         generated_gltfs.append(gltf)
+                        value_range = value_ranges.get(variable, (None, None))
                         generated_files.append(dict(
                             variable=variable,
                             output_file=str(output_file),
@@ -749,6 +754,8 @@ class tRIBSMeshViz:
                             kind=time_stamp['kind'] if time_stamp else None,
                             gltf=str(gltf_file_path),
                             legend=None,
+                            min=value_range[0],
+                            max=value_range[1],
                         ))
 
             if generate_legend:  # One legend per variable, spanning its range over all time steps

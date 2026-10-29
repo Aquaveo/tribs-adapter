@@ -56,13 +56,16 @@ def test_parse_cluster_ports():
     assert parse('["a"]') == [8081, 8082, 8083, 8084]
 
 
-def _file_entry(variable, hours, kind='d', legend=True):
+def _file_entry(variable, hours, kind='d', legend=True, value_range=(0.5, 2.5)):
     stamp = f'{int(hours):04d}_00{kind}' if hours is not None else None
     name = f'abc-salas_salas-{stamp}_{variable}' if stamp else 'abc-salas'
-    return dict(
+    entry = dict(
         variable=variable, output_file=f'/out/salas.{stamp}' if stamp else None, hours=hours, kind=kind,
         gltf=f'/tmp/x/gltf/{name}.glb', legend=f'/tmp/x/gltf/{name}_legend.png' if legend else None,
     )
+    if value_range is not None:  # None mimics files entries written before the range was recorded
+        entry.update(min=value_range[0], max=value_range[1])
+    return entry
 
 
 URL_DIR = 'fdb/fc/gltf'
@@ -87,6 +90,7 @@ def test_build_gltf_variables():
     ]
     assert mu['timesteps'][1]['url'] == 'fdb/fc/gltf/abc-salas_salas-0010_00d_Mu.glb'
     assert mu['timesteps'][1]['legend'] is None
+    assert (mu['min'], mu['max']) == (0.5, 2.5)
     # Nwt: step derived from the files that exist (20 h), not the fallback
     assert [t['hours'] for t in nwt['timesteps']] == [0, 20]
     assert nwt['step_hours'] == 20
@@ -118,11 +122,19 @@ def test_build_gltf_variables_static_entry():
     files = [_file_entry('Elevation', None)]
     variables = TribsSpatialManager._build_gltf_variables(files, URL_DIR, start_date=datetime.datetime(2004, 6, 1))
     assert variables == [dict(
-        name='Elevation', start=None, end=None, step_hours=None,
+        name='Elevation', start=None, end=None, step_hours=None, min=0.5, max=2.5,
         timesteps=[dict(hours=None, time=None, url='fdb/fc/gltf/abc-salas.glb',
                         legend='fdb/fc/gltf/abc-salas_legend.png')],
     )]
     assert TribsSpatialManager._build_gltf_variables([], URL_DIR) == []
+
+
+def test_build_gltf_variables_without_value_range():
+    """Files entries written before min/max were recorded still group; the range is reported as None."""
+    files = [_file_entry('Mu', 10, value_range=None), _file_entry('Mu', 0, value_range=None)]
+    variables = TribsSpatialManager._build_gltf_variables(files, URL_DIR)
+    assert variables[0]['min'] is None and variables[0]['max'] is None
+    assert [t['hours'] for t in variables[0]['timesteps']] == [0, 10]
 
 
 def test_build_gltf_variables_from_mesh_output(files_dir, tmp_path):
