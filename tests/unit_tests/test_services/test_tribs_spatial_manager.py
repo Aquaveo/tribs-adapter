@@ -122,11 +122,34 @@ def test_build_gltf_variables_static_entry():
     files = [_file_entry('Elevation', None)]
     variables = TribsSpatialManager._build_gltf_variables(files, URL_DIR, start_date=datetime.datetime(2004, 6, 1))
     assert variables == [dict(
-        name='Elevation', start=None, end=None, step_hours=None, min=0.5, max=2.5,
+        name='Elevation', label='Elevation', units=None, tier=None, description='', factor=1.0,
+        start=None, end=None, step_hours=None, min=0.5, max=2.5,
         timesteps=[dict(hours=None, time=None, url='fdb/fc/gltf/abc-salas.glb',
                         legend='fdb/fc/gltf/abc-salas_legend.png')],
     )]
     assert TribsSpatialManager._build_gltf_variables([], URL_DIR) == []
+
+
+def test_build_gltf_variables_with_variable_kind():
+    """With a variable table, entries carry the sheet's label, units and tier and a display-unit range."""
+    files = [
+        _file_entry('AvSM', 0, value_range=(0.1, 0.9)), _file_entry('Mystery', 0),
+        _file_entry('AvSnSub', 0, value_range=(0.0, 2.0)),
+    ]
+    variables = TribsSpatialManager._build_gltf_variables(files, URL_DIR, variable_kind='integrated')
+    av_sm, mystery, snow = variables
+    assert (av_sm['label'], av_sm['units'], av_sm['tier']) == (
+        'Mean surface soil moisture (top 10 cm)', '% saturation', 'priority'
+    )
+    assert (av_sm['min'], av_sm['max'], av_sm['factor']) == (10.0, 90.0, 100.0)
+    assert av_sm['description'].startswith('Time-averaged relative saturation')
+    assert av_sm['name'] == 'AvSM'  # the layer key stays the raw column name
+    # A column the sheet does not list keeps its name, with no units, tier or conversion
+    assert (mystery['label'], mystery['units'], mystery['tier'], mystery['factor']) == ('Mystery', None, None, 1.0)
+    assert (mystery['min'], mystery['max']) == (0.5, 2.5)
+    # AvSnSub is only in the mrf table, so under 'integrated' it is unknown
+    assert snow['tier'] is None and (snow['min'], snow['max']) == (0.0, 2.0)
+    json.dumps(variables)
 
 
 def test_build_gltf_variables_without_value_range():

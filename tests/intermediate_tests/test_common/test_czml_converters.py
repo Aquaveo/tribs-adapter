@@ -18,7 +18,34 @@ def test_get_pizel_file_variables(simple_pixel_file_path):
     ]
 
 
-def test_get_output_file_variables(simple_rft_file_path, simple_mrf_file_path):
+def test_get_output_file_units(simple_rft_file_path, simple_mrf_file_path):
+    """The second line of an mrf/rft file gives each variable's units; '[]' means none."""
+    mrf_units = czml_converters.get_output_file_units(simple_mrf_file_path)
+    assert mrf_units['Srf'] == 'm3/s'
+    assert mrf_units['MAP'] == 'mm/hr'
+    assert mrf_units['MDGW'] == 'mm'
+    assert mrf_units['FState'] is None
+    assert set(mrf_units) == {'Time', *czml_converters.get_output_file_variables(simple_mrf_file_path)}
+    rft_units = czml_converters.get_output_file_units(simple_rft_file_path)
+    assert set(rft_units) == {'Time', 'Hsrf', 'Sbsrf', 'Psrf', 'Satsrf'}
+
+
+def test_legend_title_and_factor(simple_nodes_file_path, simple_mrf_file_path, mocker):
+    """The legend PNG is drawn with the variable's title and its ticks in display units; the CZML is unchanged."""
+    from tribs_adapter.common.czml_generator import CZMLGenerator
+    generate_legend = mocker.patch.object(CZMLGenerator, '_generate_legend')
+    with TemporaryDirectory() as temp_dir:
+        path = os.path.join(temp_dir, 'mdgw.czml')
+        czml_converters.generate_czml_for_mrf_and_rft_files(
+            simple_nodes_file_path, [simple_mrf_file_path], datetime(2020, 1, 1), 1, 3, path, variable='MDGW',
+            dataset_id='test_dataset1234', srid=4326, legend_title='Depth to groundwater (m)', legend_factor=0.001,
+        )
+        assert os.path.exists(path)
+    generate_legend.assert_called_once()
+    assert generate_legend.call_args[1] == dict(title='Depth to groundwater (m)', factor=0.001)
+
+
+def test_generate_output_file_variables(simple_rft_file_path, simple_mrf_file_path):
     rft_file_variables = czml_converters.get_output_file_variables(simple_rft_file_path)
     assert rft_file_variables == ['Hsrf', 'Sbsrf', 'Psrf', 'Satsrf']
 

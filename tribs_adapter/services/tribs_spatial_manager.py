@@ -30,8 +30,11 @@ from tethysext.atcore.services.resource_spatial_manager import ResourceSpatialMa
 from tribs_adapter.common.dataset_types import DatasetTypes, CompoundDatasetTypes, \
     GltfOutputDatasetTypes, SdfDatasetTypes, WMSDatasetTypes, NoEnvStrDatasetTypes
 from tribs_adapter.common.czml_converters import generate_czml_for_pixel_files, generate_czml_for_mrf_and_rft_files, \
-    generate_czml_for_qout_files, get_file_variables, get_output_file_variables, get_extents, get_nodes, \
-    generate_czml_for_sdf_station, reproject
+    generate_czml_for_qout_files, get_file_variables, get_output_file_units, get_output_file_variables, get_extents, \
+    get_nodes, generate_czml_for_sdf_station, reproject
+from tribs_adapter.common.output_variables import (
+    describe as describe_variable, kind_for_dataset_type, scale_range, split_unit_suffix, visible_variables
+)
 from tribs_adapter.io.tribs_mesh import tRIBSMeshViz, parse_output_file_name
 
 log = logging.getLogger(__name__)
@@ -309,7 +312,12 @@ class TribsSpatialManager(ResourceSpatialManager):
             linked_realization = dataset.linked_realizations[0]
             output_node_file = linked_realization.input_file.files_and_pathnames.mesh_generation.INPUTDATAFILE
             node_file_dataset = session.query(Dataset).get(str(output_node_file.resource_id))
-            gltf_meta = self.create_tribs_tin_layer(node_file_dataset, mesh_epsg=srid, output_dataset=dataset)
+            # The variable table (friendly labels, display units, priority tiers) for this kind of output file, if
+            # the sheet covers it (integrated _i output; legacy time-dynamic _d datasets have no table).
+            variable_kind = kind_for_dataset_type(dataset.dataset_type)
+            gltf_meta = self.create_tribs_tin_layer(
+                node_file_dataset, mesh_epsg=srid, output_dataset=dataset, variable_kind=variable_kind
+            )
             # Time axis of the spatial output: STARTDATE anchors the hours parsed from the output file names, and
             # SPOPINTRVL (spatial output interval) is the fallback step when there is a single output file.
             time_variables = linked_realization.input_file.run_parameters.time_variables
@@ -319,7 +327,8 @@ class TribsSpatialManager(ResourceSpatialManager):
                 start_date = None
             # Override viz with gltf viz
             viz = self._build_gltf_viz(
-                dataset, gltf_meta, start_date=start_date, fallback_step_hours=time_variables.SPOPINTRVL
+                dataset, gltf_meta, start_date=start_date, fallback_step_hours=time_variables.SPOPINTRVL,
+                variable_kind=variable_kind,
             )
 
         elif dataset.dataset_type in [
@@ -347,6 +356,8 @@ class TribsSpatialManager(ResourceSpatialManager):
                 'extent': meta.get('extents'),
                 'legend': legend_urls,
             }
+            if meta.get('variables'):
+                viz['variables'] = meta['variables']
 
         elif dataset.dataset_type in CompoundDatasetTypes:
             layers, extent, env_strs = self.create_all_compound_layers(dataset, srid)
@@ -760,7 +771,9 @@ class TribsSpatialManager(ResourceSpatialManager):
             recurse=True,
         )
 
-    def create_tribs_tin_layer(self, dataset, mesh_epsg, output_dataset=None, output_variables=None):
+    def create_tribs_tin_layer(
+        self, dataset, mesh_epsg, output_dataset=None, output_variables=None, variable_kind=None
+    ):
         """
         Write the glTF visualization (Voronoi cells draped on the TIN) for a tRIBS mesh dataset.
 
@@ -768,7 +781,11 @@ class TribsSpatialManager(ResourceSpatialManager):
             dataset(tribs_adapter.resources.dataset.Dataset): Dataset instance.
             mesh_epsg(int): EPSG code for the mesh.
             output_dataset(tribs_adapter.resources.dataset.Dataset): Output dataset instance.
-            output_variables(list): List of output variables to include in the GLTF.
+            output_variables(list): List of output variables to include in the GLTF. Defaults to every variable of
+                the output files, or, with ``variable_kind``, to the variables the sheet offers (priority and
+                secondary tiers; hidden and ignored variables are not rendered).
+            variable_kind(str): Variable table of the output files (``output_variables.QOUT`` etc., see
+                ``kind_for_dataset_type``). Labels the legends with friendly names and display units.
         """
         # Get Path to dataset workspace
         collection_path = dataset.file_collection_client.path
@@ -808,8 +825,19 @@ class TribsSpatialManager(ResourceSpatialManager):
 
         # Create the gltf
         tribs_mesh = tRIBSMeshViz(mesh_file, mesh_epsg=mesh_epsg, output_files=output_files, voi_file=voi_file)
+        variable_labels = None
+        if variable_kind is not None and output_files:
+            columns = list(dict.fromkeys(c for f in output_files for c in tribs_mesh.data[f].keys()))
+            if output_variables is None:
+                output_variables = visible_variables(variable_kind, columns)
+            variable_labels = {}
+            for variable in output_variables:
+                info = describe_variable(variable_kind, variable)
+                title = f"{info['label']} ({info['units']})" if info['units'] else info['label']
+                variable_labels[variable] = dict(title=title, factor=info['factor'])
         meta = tribs_mesh.to_gltf(
-            gltf_out_path, to_epsg=mesh_epsg, output_variables=output_variables, generate_legend=True
+            gltf_out_path, to_epsg=mesh_epsg, output_variables=output_variables, generate_legend=True,
+            variable_labels=variable_labels,
         )
 
         # If we have an output dataset, add the gltf to the output dataset
@@ -837,7 +865,7 @@ class TribsSpatialManager(ResourceSpatialManager):
         return not name.endswith(companions) and parse_output_file_name(name) is not None
 
     @staticmethod
-    def _build_gltf_variables(files, url_dir, start_date=None, fallback_step_hours=None):
+    def _build_gltf_variables(files, url_dir, start_date=None, fallback_step_hours=None, variable_kind=None):
         """Group the glTF files written by ``tRIBSMeshViz.to_gltf`` into per-variable time series.
 
         Args:
@@ -847,19 +875,26 @@ class TribsSpatialManager(ResourceSpatialManager):
                 When None, the ``time``, ``start`` and ``end`` fields are None and only ``hours`` is populated.
             fallback_step_hours(float): Time step (hours) to report when it cannot be derived from the files, i.e.
                 when a variable has a single time step (SPOPINTRVL).
+            variable_kind(str): Variable table of the output files (see ``output_variables.kind_for_dataset_type``);
+                None when the sheet does not cover them.
 
         Returns:
             list: One entry per variable, in the order the variables were first written::
 
-                {'name': 'Mu', 'start': '2004-06-01T00:00:00Z', 'end': '2004-06-02T16:00:00Z', 'step_hours': 10,
-                 'min': 0.1, 'max': 0.9,
-                 'timesteps': [{'hours': 0, 'time': '2004-06-01T00:00:00Z', 'url': '<url_dir>/..._Mu.glb',
-                                'legend': '<url_dir>/..._Mu_legend.png' or None}, ...]}
+                {'name': 'AvSM', 'label': 'Mean surface soil moisture (top 10 cm)', 'units': '% saturation',
+                 'tier': 'priority', 'description': '...', 'factor': 100,
+                 'start': '2004-06-01T00:00:00Z', 'end': '2004-06-02T16:00:00Z', 'step_hours': 10,
+                 'min': 10.0, 'max': 90.0,
+                 'timesteps': [{'hours': 0, 'time': '2004-06-01T00:00:00Z', 'url': '<url_dir>/..._AvSM.glb',
+                                'legend': '<url_dir>/..._AvSM_legend.png' or None}, ...]}
 
-            Time steps are sorted by hours. A static variable (bare mesh, ``hours`` None) has ``start``, ``end`` and
-            ``step_hours`` None. ``min`` and ``max`` are the value range the variable's colors are scaled to over all
-            of its time steps (None for ``files`` entries written before the range was recorded). The result is JSON
-            serializable.
+            ``name`` is the raw column name (the layer key). ``label``, ``units``, ``tier`` (``'priority'``,
+            ``'secondary'`` or None) and ``description`` come from the variable table; a variable the table does not
+            know keeps its name as the label, with no units, tier or description. ``min`` and ``max`` are the value
+            range the variable's colors are scaled to over all of its time steps, in display units (file values times
+            ``factor``; None for ``files`` entries written before the range was recorded). Time steps are sorted by
+            hours. A static variable (bare mesh, ``hours`` None) has ``start``, ``end`` and ``step_hours`` None. The
+            result is JSON serializable.
         """
         def to_url(path):
             return os.path.join(url_dir, os.path.basename(path)) if path else None
@@ -888,19 +923,26 @@ class TribsSpatialManager(ResourceSpatialManager):
                 step_hours = fallback_step_hours
             else:
                 step_hours = None
+            info = describe_variable(variable_kind, name)
+            low, high = scale_range(entries[0].get('min'), entries[0].get('max'), info['factor'])
             variables.append(dict(
                 name=name,
+                label=info['label'],
+                units=info['units'],
+                tier=info['tier'],
+                description=info['description'],
+                factor=info['factor'],
                 start=timesteps[0]['time'],
                 end=timesteps[-1]['time'],
                 step_hours=step_hours,
-                min=entries[0].get('min'),
-                max=entries[0].get('max'),
+                min=low,
+                max=high,
                 timesteps=timesteps,
             ))
         return variables
 
     @classmethod
-    def _build_gltf_viz(cls, dataset, gltf_meta, start_date=None, fallback_step_hours=None):
+    def _build_gltf_viz(cls, dataset, gltf_meta, start_date=None, fallback_step_hours=None, variable_kind=None):
         """Build the ``viz`` attribute of a dataset visualized with glTF files.
 
         Args:
@@ -908,6 +950,7 @@ class TribsSpatialManager(ResourceSpatialManager):
             gltf_meta(dict): Metadata returned by ``tRIBSMeshViz.to_gltf`` (via ``create_tribs_tin_layer``).
             start_date(datetime.datetime): See ``_build_gltf_variables``.
             fallback_step_hours(float): See ``_build_gltf_variables``.
+            variable_kind(str): See ``_build_gltf_variables``.
 
         Returns:
             dict: ``{'type': 'gltf', 'url': [...], 'legend': [...], 'origin': [...], 'extent': [...],
@@ -919,7 +962,8 @@ class TribsSpatialManager(ResourceSpatialManager):
         viz_urls = [os.path.join(url_dir, f) for f in gltf_files if f.endswith(cls.GLTF_EXTENSIONS)]
         legend_urls = [os.path.join(url_dir, f) for f in gltf_files if f.endswith('.png')]
         variables = cls._build_gltf_variables(
-            gltf_meta.get('files', []), url_dir, start_date=start_date, fallback_step_hours=fallback_step_hours
+            gltf_meta.get('files', []), url_dir, start_date=start_date, fallback_step_hours=fallback_step_hours,
+            variable_kind=variable_kind,
         )
         return {
             'type': 'gltf',
@@ -968,6 +1012,15 @@ class TribsSpatialManager(ResourceSpatialManager):
 
         extent = None
         origin = None
+        # How each CZML layer is presented: ``[{'name': <layer name>, 'label', 'units', 'tier', 'description',
+        # 'factor'}]`` from the variable table (``output_variables``) for file kinds the sheet covers (mrf, qout) and
+        # from the file headers otherwise (pixel, rft). Hidden and ignored variables of covered kinds get no layer.
+        variable_kind = kind_for_dataset_type(dataset.dataset_type)
+        variables_meta = []
+
+        def legend_args(info):
+            title = f"{info['label']} ({info['units']})" if info['units'] else info['label']
+            return dict(legend_title=title, legend_factor=info['factor'])
 
         # Get Point File Dataset
         if dataset.dataset_type not in SdfDatasetTypes:
@@ -996,6 +1049,9 @@ class TribsSpatialManager(ResourceSpatialManager):
                     pixels_files[0]
                 )  # All pixel files should have the same variables
                 for variable in pixel_file_variables:
+                    base, unit_token = split_unit_suffix(variable)
+                    info = describe_variable(variable_kind, base, unit_token=unit_token)
+                    variables_meta.append(dict(name=variable, **info))
                     czml_file_path = os.path.join(czml_path, f'{str(dataset.id)}-{variable}.czml')
                     generate_czml_for_pixel_files(
                         node_file,
@@ -1006,14 +1062,19 @@ class TribsSpatialManager(ResourceSpatialManager):
                         czml_file_path,
                         str(dataset.id),
                         variable,
-                        srid=srid
+                        srid=srid,
+                        **legend_args(info),
                     )
             elif dataset.dataset_type == DatasetTypes.TRIBS_OUT_QOUT:
                 qout_files = [
                     os.path.join(dataset.file_collection_client.path, f) for f in files if f.endswith('.qout')
                 ]
-                qout_variables = get_file_variables(qout_files[0], skip_cols=1)
-                for variable in qout_variables:
+                qout_variables = get_file_variables(qout_files[0], skip_cols=1)  # e.g. ['Qstrm_m3-s', 'Hlev_m']
+                layer_by_base = {split_unit_suffix(v)[0]: v for v in qout_variables}
+                for base in visible_variables(variable_kind, layer_by_base.keys()):
+                    variable = layer_by_base[base]
+                    info = describe_variable(variable_kind, base, unit_token=split_unit_suffix(variable)[1])
+                    variables_meta.append(dict(name=variable, **info))
                     czml_file_path = os.path.join(czml_path, f'{str(dataset.id)}-{variable}.czml')
                     generate_czml_for_qout_files(
                         node_file,
@@ -1024,7 +1085,8 @@ class TribsSpatialManager(ResourceSpatialManager):
                         czml_file_path,
                         str(dataset.id),
                         variable,
-                        srid=srid
+                        srid=srid,
+                        **legend_args(info),
                     )
             elif dataset.dataset_type in [DatasetTypes.TRIBS_OUT_MRF, DatasetTypes.TRIBS_OUT_RFT]:
                 extension = '.mrf' if dataset.dataset_type == DatasetTypes.TRIBS_OUT_MRF else '.rft'
@@ -1032,7 +1094,10 @@ class TribsSpatialManager(ResourceSpatialManager):
                     os.path.join(dataset.file_collection_client.path, f) for f in files if f.endswith(extension)
                 ]
                 out_variables = get_output_file_variables(out_files[0])
-                for variable in out_variables:
+                file_units = get_output_file_units(out_files[0])
+                for variable in visible_variables(variable_kind, out_variables):
+                    info = describe_variable(variable_kind, variable, file_units=file_units.get(variable))
+                    variables_meta.append(dict(name=variable, **info))
                     czml_file_path = os.path.join(czml_path, f'{str(dataset.id)}-{variable}.czml')
                     generate_czml_for_mrf_and_rft_files(
                         node_file,
@@ -1043,7 +1108,8 @@ class TribsSpatialManager(ResourceSpatialManager):
                         czml_file_path,
                         str(dataset.id),
                         variable,
-                        srid=srid
+                        srid=srid,
+                        **legend_args(info),
                     )
             elif dataset.dataset_type in SdfDatasetTypes:
                 # Get the sdf file
@@ -1144,6 +1210,7 @@ class TribsSpatialManager(ResourceSpatialManager):
         meta = {
             'origin': origin,
             'extents': extent,
+            'variables': variables_meta,
         }
 
         return meta

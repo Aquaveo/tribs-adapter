@@ -639,6 +639,7 @@ class tRIBSMeshViz:
         color_ramp_file=None,
         generate_legend=False,
         binary=True,
+        variable_labels=None,
     ) -> dict:
         """Write mesh to glTF file.
 
@@ -651,6 +652,9 @@ class tRIBSMeshViz:
             generate_legend: Generate a legend for the glTF file. Defaults to False.
             binary: Write binary glTF (``.glb``, default). If False, write JSON glTF (``.gltf``) with the buffers
                 and the color ramp image embedded as base64 data URIs (about a third larger).
+            variable_labels: Optional ``{variable: {'title': str, 'factor': float}}`` for the legends: the title is
+                drawn above the legend and the tick values are the file values times ``factor`` (display units).
+                The glTF files and the ``min``/``max`` in ``files`` are always in file units.
 
         Returns:
             Dictionary with metadata about the generated glTF files::
@@ -765,7 +769,9 @@ class tRIBSMeshViz:
                         log.warning(f"No values to generate a legend from. Skipping legend: {legend_path}")
                         continue
                     log.debug(f"Generating legend: {legend_path}")
-                    self._generate_legend(*value_ranges[variable], legend_path, color_ramp_file)
+                    spec = (variable_labels or {}).get(variable, {})
+                    low, high = sorted(v * spec.get('factor', 1.0) for v in value_ranges[variable])
+                    self._generate_legend(low, high, legend_path, color_ramp_file, title=spec.get('title'))
                     for entry in generated_files:
                         if entry['variable'] == variable:
                             entry['legend'] = legend_path
@@ -1308,7 +1314,9 @@ class tRIBSMeshViz:
         self._generate_legend(min(valid_values), max(valid_values), legend_path, image_path)
         return True
 
-    def _generate_legend(self, min_val, max_val, legend_path, image_path):
+    def _generate_legend(self, min_val, max_val, legend_path, image_path, title=None):
+        """Draw a legend PNG of the color ramp ``image_path`` labelled from ``min_val`` to ``max_val``, with an optional
+        ``title`` (e.g. "Root-zone soil moisture (% saturation)") above it."""
         # Open the image
         image = Image.open(image_path).rotate(90)
         gradient = np.array(image)
@@ -1326,6 +1334,8 @@ class tRIBSMeshViz:
         ax.set_xticks(ticks * (gradient.shape[1] - 1))
         ax.set_xticklabels([f'{label:.2f}' for label in tick_labels])
         ax.set_yticks([])
+        if title:
+            ax.set_title(title, fontsize=10)
 
         # Save the figure as a PNG file
         plt.savefig(legend_path, bbox_inches='tight')

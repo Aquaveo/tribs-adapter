@@ -201,7 +201,7 @@ def test_project_serialize_json(complete_project):
 def test_project_delete_children(complete_project):
     project = complete_project
     session = object_session(project)
-    assert len(project.datasets) == 19
+    assert len(project.datasets) == 18
     assert len(project.scenarios) == 1
     assert len(project.scenarios[0].realizations) == 1
     dataset_ids = [d.id for d in project.datasets]

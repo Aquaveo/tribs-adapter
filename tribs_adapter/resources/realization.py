@@ -22,8 +22,9 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
 
     UPLOAD_STATUS_KEY = 'upload'
 
-    # Output file extensions whose datasets hold per-Voronoi-cell variables (and therefore get the _voi file too)
-    VORONOI_OUTPUT_EXTENSIONS = ('_00d', '_00i')
+    # Output file extensions whose datasets hold per-Voronoi-cell variables (and therefore get the _voi file too).
+    # Only the time-integrated output: the time-dynamic _d files are not turned into a dataset (see FILE_TO_DATASET).
+    VORONOI_OUTPUT_EXTENSIONS = ('_00i',)
 
     __mapper_args__ = {
         'polymorphic_identity': TYPE,

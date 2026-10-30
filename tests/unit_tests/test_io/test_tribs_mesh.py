@@ -419,6 +419,38 @@ def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory):
         assert (cell_uv[2:] == 1.0).all()  # Cells without a value stay transparent
 
 
+def test_variable_labels_title_and_scale_the_legends(tmv_factory, mocker):
+    """``variable_labels`` titles each variable's legend and draws its ticks in display units (file values x factor);
+    the glTF files and the reported min/max stay in file units."""
+    output_dir = tempfile.mkdtemp()
+    with open(os.path.join(output_dir, 'scaled.0000_00d'), 'w') as f:
+        f.write("ID,Foo\n0,10\n1,20\n")
+    with open(os.path.join(output_dir, 'scaled.0010_00d'), 'w') as f:
+        f.write("ID,Foo\n0,20\n1,40\n")  # variable range 10..40 in file units
+    mesh_basename = 'salas_outputs'
+    tmv = tmv_factory(mesh_basename, '32613')
+    tmv.output_files = [os.path.join(output_dir, 'scaled.0000_00d'), os.path.join(output_dir, 'scaled.0010_00d')]
+    generate_legend = mocker.patch.object(tmv, '_generate_legend')
+
+    base = os.path.join(tempfile.mkdtemp(), mesh_basename)
+    meta = tmv.to_gltf(
+        base, '32613', output_variables=['Foo'], generate_legend=True,
+        variable_labels={'Foo': dict(title='Foo moisture (% saturation)', factor=100)},
+    )
+    generate_legend.assert_called_once()
+    (low, high, legend_path, ramp), kwargs = generate_legend.call_args
+    assert (low, high) == (1000.0, 4000.0)
+    assert legend_path == f'{base}_Foo_legend.png'
+    assert kwargs == dict(title='Foo moisture (% saturation)')
+    assert [(f['min'], f['max']) for f in meta['files']] == [(10.0, 40.0)] * 2  # file units
+
+    # A negative factor keeps the legend range ordered; variables without a spec are untouched
+    generate_legend.reset_mock()
+    tmv.to_gltf(base, '32613', output_variables=['Foo'], generate_legend=True, variable_labels={'Foo': dict(factor=-1)})
+    assert generate_legend.call_args[0][:2] == (-40.0, -10.0)
+    assert generate_legend.call_args[1] == dict(title=None)
+
+
 def test_generate_legend_for_values(tmv_factory, files_dir, tmp_path, caplog):
     tmv = tmv_factory('salas', '32613')
     color_ramp_file = os.path.join(files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'RedToBlue.png')
