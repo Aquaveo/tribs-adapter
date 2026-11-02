@@ -37,7 +37,7 @@ def test_kind_for_dataset_type():
 
 
 def test_lookup_by_name_and_alias():
-    assert ov.lookup('mrf', 'MDGW').label == 'Depth to groundwater'
+    assert ov.lookup('mrf', 'MDGW').label == 'Depth to Groundwater'
     assert ov.lookup('mrf', 'MGW') is ov.lookup('mrf', 'MDGW')  # older tRIBS builds
     assert ov.lookup('mrf', 'Max').name == 'RainMax'
     assert ov.lookup('mrf', '%Sat').name == 'SatPercent'
@@ -60,7 +60,7 @@ def test_split_unit_suffix():
 
 def test_describe_known_variables():
     assert ov.describe('mrf', 'MSMRt') == dict(
-        label='Root-zone soil moisture', units='% saturation', tier='priority',
+        label='Root-Zone Soil Moisture', units='% saturation', tier='priority',
         description='Basin-average relative saturation (θ/θs) of the top 1m of soil.', factor=100.0,
     )
     assert ov.describe('mrf', 'MGW')['factor'] == 0.001 and ov.describe('mrf', 'MGW')['units'] == 'm'

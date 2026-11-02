@@ -148,7 +148,7 @@ def test_create_time_integrated_layer_offers_only_sheet_variables(tsm, time_inte
     assert names[:6] == ['Z', 'AvSM', 'AvRtM', 'peakWE', 'cSnSub', 'cSnEvap']  # priority first, file order
     assert [v['tier'] for v in viz['variables']] == ['priority'] * 6 + ['secondary'] * 9
     av_sm = next(v for v in viz['variables'] if v['name'] == 'AvSM')
-    assert (av_sm['label'], av_sm['units']) == ('Mean surface soil moisture (top 10 cm)', '% saturation')
+    assert (av_sm['label'], av_sm['units']) == ('Mean Surface Soil Moisture (Top 10 cm)', '% saturation')
     assert av_sm['factor'] == 100.0 and 0 <= av_sm['min'] <= av_sm['max'] <= 100
     assert av_sm['description']
     json.dumps(viz)

@@ -38,11 +38,11 @@ def test_legend_title_and_factor(simple_nodes_file_path, simple_mrf_file_path, m
         path = os.path.join(temp_dir, 'mdgw.czml')
         czml_converters.generate_czml_for_mrf_and_rft_files(
             simple_nodes_file_path, [simple_mrf_file_path], datetime(2020, 1, 1), 1, 3, path, variable='MDGW',
-            dataset_id='test_dataset1234', srid=4326, legend_title='Depth to groundwater (m)', legend_factor=0.001,
+            dataset_id='test_dataset1234', srid=4326, legend_title='Depth to Groundwater (m)', legend_factor=0.001,
         )
         assert os.path.exists(path)
     generate_legend.assert_called_once()
-    assert generate_legend.call_args[1] == dict(title='Depth to groundwater (m)', factor=0.001)
+    assert generate_legend.call_args[1] == dict(title='Depth to Groundwater (m)', factor=0.001)
 
 
 def test_generate_output_file_variables(simple_rft_file_path, simple_mrf_file_path):

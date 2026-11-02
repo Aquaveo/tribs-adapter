@@ -139,7 +139,7 @@ def test_build_gltf_variables_with_variable_kind():
     variables = TribsSpatialManager._build_gltf_variables(files, URL_DIR, variable_kind='integrated')
     av_sm, mystery, snow = variables
     assert (av_sm['label'], av_sm['units'], av_sm['tier']) == (
-        'Mean surface soil moisture (top 10 cm)', '% saturation', 'priority'
+        'Mean Surface Soil Moisture (Top 10 cm)', '% saturation', 'priority'
     )
     assert (av_sm['min'], av_sm['max'], av_sm['factor']) == (10.0, 90.0, 100.0)
     assert av_sm['description'].startswith('Time-averaged relative saturation')
