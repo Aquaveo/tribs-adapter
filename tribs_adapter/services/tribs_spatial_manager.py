@@ -830,11 +830,11 @@ class TribsSpatialManager(ResourceSpatialManager):
             columns = list(dict.fromkeys(c for f in output_files for c in tribs_mesh.data[f].keys()))
             if output_variables is None:
                 output_variables = visible_variables(variable_kind, columns)
+            # Legends are drawn without a title: the app writes the dataset, variable and units around the scale.
             variable_labels = {}
             for variable in output_variables:
                 info = describe_variable(variable_kind, variable)
-                title = f"{info['label']} ({info['units']})" if info['units'] else info['label']
-                variable_labels[variable] = dict(title=title, factor=info['factor'])
+                variable_labels[variable] = dict(factor=info['factor'])
         meta = tribs_mesh.to_gltf(
             gltf_out_path, to_epsg=mesh_epsg, output_variables=output_variables, generate_legend=True,
             variable_labels=variable_labels,
@@ -1019,8 +1019,8 @@ class TribsSpatialManager(ResourceSpatialManager):
         variables_meta = []
 
         def legend_args(info):
-            title = f"{info['label']} ({info['units']})" if info['units'] else info['label']
-            return dict(legend_title=title, legend_factor=info['factor'])
+            # No title on the PNG: the app writes the dataset, variable and units around the legend itself.
+            return dict(legend_factor=info['factor'])
 
         # Get Point File Dataset
         if dataset.dataset_type not in SdfDatasetTypes:
