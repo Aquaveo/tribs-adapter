@@ -106,7 +106,10 @@ class CZMLGenerator:
         czml_polygon = CzmlPolygonData(polygon, data_values, id, start_time, run_time, interval)
         self.polygons.append(czml_polygon)
 
-    def write_czml(self, filename, legend=False):
+    def write_czml(self, filename, legend=False, legend_title=None, legend_factor=1.0):
+        """Write the CZML document and, with ``legend``, a legend PNG per geometry type. ``legend_title`` is drawn above
+        the legend and its tick values are the data values times ``legend_factor`` (display units); the CZML colors are
+        unaffected because they are normalized per layer."""
         czml = [{
             "id": "document",
             "name": self.name,
@@ -124,9 +127,13 @@ class CZMLGenerator:
 
         if legend:
             if len(self.points) > 0:
-                self.generate_point_legend(filename.replace('.czml', '_point_legend.png'))
+                self.generate_point_legend(
+                    filename.replace('.czml', '_point_legend.png'), title=legend_title, factor=legend_factor
+                )
             if len(self.polygons) > 0:
-                self.generate_polygon_legend(filename.replace('.czml', '_polygon_legend.png'))
+                self.generate_polygon_legend(
+                    filename.replace('.czml', '_polygon_legend.png'), title=legend_title, factor=legend_factor
+                )
 
     def _generate_point_czml(self, point):
         min_point_value = np.min([np.min(point.values) for point in self.points])
@@ -205,20 +212,21 @@ class CZMLGenerator:
 
         return czml
 
-    def generate_point_legend(self, filename):
+    def generate_point_legend(self, filename, title=None, factor=1.0):
         min_point_value = np.min([np.min(point.values) for point in self.points])
         max_point_value = np.max([np.max(point.values) for point in self.points])
-        self._generate_legend(min_point_value, max_point_value, filename)
+        self._generate_legend(min_point_value, max_point_value, filename, title=title, factor=factor)
 
-    def generate_polygon_legend(self, filename):
+    def generate_polygon_legend(self, filename, title=None, factor=1.0):
         min_polygon_value = np.min([np.min(polygon.values) for polygon in self.polygons])
         max_polygon_value = np.max([np.max(polygon.values) for polygon in self.polygons])
-        self._generate_legend(min_polygon_value, max_polygon_value, filename)
+        self._generate_legend(min_polygon_value, max_polygon_value, filename, title=title, factor=factor)
 
-    def _generate_legend(self, min_val, max_val, legend_path):
+    def _generate_legend(self, min_val, max_val, legend_path, title=None, factor=1.0):
         # Create a colormap from white to blue
         colormap = mcolors.LinearSegmentedColormap.from_list("WtoB", ["white", "blue"])
 
+        min_val, max_val = sorted((min_val * factor, max_val * factor))  # display units; sorted for negative factors
         if max_val - min_val == 0:
             max_val += 1  # This way the range looks a little better on the legend.
 
@@ -236,6 +244,8 @@ class CZMLGenerator:
         ax.set_xticks(ticks * (gradient.shape[1] - 1))
         ax.set_xticklabels([f'{label:.5f}' for label in tick_labels])
         ax.set_yticks([])
+        if title:
+            ax.set_title(title, fontsize=10)
 
         # Save the figure as a PNG file
         plt.savefig(legend_path, bbox_inches='tight')

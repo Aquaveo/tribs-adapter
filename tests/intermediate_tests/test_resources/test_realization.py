@@ -261,7 +261,7 @@ def test_realization_init_dataset_exception(db_session, scenario_with_input, fil
     db_session.commit()
 
     def dataset_new(name, *args, **kwargs):
-        if name == 'Time-Dynamic Variable Output':
+        if name == 'Time-Integrated Variable Output':
             raise RuntimeError('Test Dataset Exception')
         return mock.MagicMock(
             spec=Dataset,
@@ -279,17 +279,17 @@ def test_realization_init_dataset_exception(db_session, scenario_with_input, fil
 
     mock_log.exception.assert_called_once()
     mock_log.exception.assert_called_with(
-        'Failed to initialize Dataset "Time-Dynamic Variable Output" for card "OUTFILENAME". Skipping...'
+        'Failed to initialize Dataset "Time-Integrated Variable Output" for card "OUTFILENAME". Skipping...'
     )
     mock_new_dataset.assert_called()
-    assert len(mock_new_dataset.call_args_list) == 7
+    assert len(mock_new_dataset.call_args_list) == 6
     realization_output_files = realization.input_file.files(mode=realization.input_file.FilesMode.OUTPUT_ONLY)
     file_datasbase_paths = []
     for _, file_database_collection in realization_output_files:
         file_datasbase_paths.extend(file_database_collection.file_database_paths)
-    # 7 output datasets in salas.in, but Time Dynamic fails to initialize
-    assert len(file_datasbase_paths) == 6
-    assert not any([d.name == 'Time-Dynamic Variable Output' for d in realization.get_linked(of_type=Dataset)])
+    # 6 output datasets in salas.in (the time-dynamic _00d files make none), but Time Integrated fails to initialize
+    assert len(file_datasbase_paths) == 5
+    assert not any([d.name == 'Time-Integrated Variable Output' for d in realization.get_linked(of_type=Dataset)])
 
     # Clean up
     for dataset in realization.get_linked(of_type=Dataset):
@@ -320,7 +320,7 @@ def test_realization_init_generate_visualization_exception(db_session, scenario_
         )
 
         # should log the exception with any call to generate_visualizations had exceptions (all of them)
-        assert mock_log.exception.call_count == 7
+        assert mock_log.exception.call_count == 6
 
         # dataset objects are still created and linked to the realization
         for dataset in realization.linked_datasets:
@@ -362,8 +362,8 @@ def test_realization_delete_children(complete_project):
     assert len(project.scenarios) == 1
     assert len(project.scenarios[0].realizations) == 1
     realization = project.scenarios[0].realizations[0]
-    assert len(project.datasets) == 19
-    assert len(realization.linked_datasets) == 7
+    assert len(project.datasets) == 18
+    assert len(realization.linked_datasets) == 6
     dataset_ids = [d.id for d in realization.linked_datasets]
 
     # Should datasets linked to realization
@@ -387,9 +387,9 @@ salas_export_input_files = [
     'Weather/weatherC1601_2004.sdf', 'Weather/weatherC1601_2004.mdf',
 ]
 
-# Files written by Realization.export for the salas model (output datasets)
+# Files written by Realization.export for the salas model (output datasets; the time-dynamic _00d files are not in
+# any dataset and so are not exported)
 salas_export_output_files = [
-    'Output/voronoi/salas.0000_00d', 'Output/voronoi/salas.0010_00d', 'Output/voronoi/salas.0700_00d',
     'Output/voronoi/salas.0000_00i', 'Output/voronoi/salas.0700_00i',
     'Output/voronoi/salas0.pixel',
     'Output/hyd/salas0700_00.mrf', 'Output/hyd/salas.cntrl', 'Output/hyd/salas0700_00.rft',

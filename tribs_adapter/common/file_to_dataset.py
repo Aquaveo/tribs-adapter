@@ -237,18 +237,19 @@ FILE_TO_DATASET = {
         "is_output": False,
     },
     # Output Data
+    # tRIBS also writes time-dynamic spatial output (<OUTFILENAME>.<HHHH>_<MM>d). It is an instantaneous snapshot of
+    # the state variables and was dropped as a dataset on purpose (2026-10-30, at the scientist's request): the
+    # time-integrated _i files are the useful spatial output. The _d files stay in the model directory only.
     "OUTFILENAME": {
         "dataset_name": {
-            "_00d": "Time-Dynamic Variable Output",
             "_00i": "Time-Integrated Variable Output",
             ".pixel": "Node Dynamic Output",
         },
         "dataset_type": {
-            "_00d": DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
             "_00i": DatasetTypes.TRIBS_OUT_TIME_INTEGRATED,
             ".pixel": DatasetTypes.TRIBS_OUT_PIXEL,
         },
-        "file_extensions": ["_00d", "_00i", ".pixel"],
+        "file_extensions": ["_00i", ".pixel"],
         "group_by_file_extension": True,
         "is_basename": True,
         "is_directory": False,

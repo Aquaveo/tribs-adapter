@@ -2,7 +2,9 @@ from tribs_adapter.common.dataset_types import DatasetTypes
 
 expected_file_fields_salas = {
     "OUTFILENAME": {
-        'fdps': [['salas.0000_00d', 'salas.0010_00d', 'salas.0700_00d'], ['salas.0000_00i', 'salas.0700_00i'],
+        # The Voronoi polygon file (_voi) is kept with the spatial variable output dataset (_00i). The time-dynamic
+        # _00d files written by tRIBS are not turned into a dataset.
+        'fdps': [['salas.0000_00i', 'salas.0700_00i', 'salas_voi'],
                  ['salas0.pixel']],
         'path': 'Output/voronoi/salas',
     },
@@ -13,11 +15,6 @@ expected_file_fields_salas = {
 }
 
 expected_datasets_salas = [
-    {
-        'name': 'Time-Dynamic Variable Output',
-        'type': DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
-        'description': 'Time-Dynamic Variable Output for Test Realization.'
-    },
     {
         'name': 'Time-Integrated Variable Output',
         'type': DatasetTypes.TRIBS_OUT_TIME_INTEGRATED,
@@ -52,7 +49,7 @@ expected_datasets_salas = [
 
 expected_file_fields_examplebasin = {
     "OUTFILENAME": {
-        'fdps': [['examplebasin.0010_00d', 'examplebasin.0000_00d'], ['examplebasin.0000_00i', 'examplebasin.0010_00i'],
+        'fdps': [['examplebasin.0000_00i', 'examplebasin.0010_00i', 'examplebasin_voi'],
                  ['examplebasin948.pixel', 'examplebasin72.pixel', 'examplebasin1156.pixel']],
         'path': 'Output/Fall1996/voronoi/examplebasin',
     },
@@ -64,11 +61,6 @@ expected_file_fields_examplebasin = {
 }
 
 expected_datasets_examplebasin = [
-    {
-        'name': 'Time-Dynamic Variable Output',
-        'type': DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
-        'description': 'Time-Dynamic Variable Output for Test Realization.'
-    },
     {
         'name': 'Time-Integrated Variable Output',
         'type': DatasetTypes.TRIBS_OUT_TIME_INTEGRATED,

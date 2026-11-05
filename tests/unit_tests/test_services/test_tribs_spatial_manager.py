@@ -1,0 +1,186 @@
+import datetime
+import json
+import os
+
+from tribs_adapter.services.tribs_spatial_manager import TribsSpatialManager
+
+
+def _touch(path):
+    with open(path, 'w') as f:
+        f.write('')
+    return str(path)
+
+
+def test_is_tribs_variable_output_file(tmp_path):
+    assert TribsSpatialManager._is_tribs_variable_output_file(_touch(tmp_path / 'salas.0000_00d'))
+    assert TribsSpatialManager._is_tribs_variable_output_file(_touch(tmp_path / 'salas.0700_00i'))
+    # Companion files that are not spatial variable output
+    companions = ['__meta__.json', 'salas_voi', 'salas_area', 'salas_reach', 'salas_width',
+                  'x.gltf', 'x.glb', 'x_legend.png']
+    for name in companions:
+        assert not TribsSpatialManager._is_tribs_variable_output_file(_touch(tmp_path / name)), name
+    # Directories
+    os.mkdir(tmp_path / 'gltf')
+    assert not TribsSpatialManager._is_tribs_variable_output_file(str(tmp_path / 'gltf'))
+
+
+def test_find_voi_file(tmp_path):
+    mesh_dir = tmp_path / 'mesh'
+    output_dir = tmp_path / 'output'
+    mesh_dir.mkdir()
+    output_dir.mkdir()
+    mesh_file = str(mesh_dir / 'salas')
+
+    # Nothing available
+    assert TribsSpatialManager._find_voi_file(mesh_file) is None
+    assert TribsSpatialManager._find_voi_file(mesh_file, str(output_dir)) is None
+
+    # In the output dataset collection (written by tRIBS with the _00d/_00i files)
+    output_voi = _touch(output_dir / 'scenario_voi')
+    assert TribsSpatialManager._find_voi_file(mesh_file, str(output_dir)) == output_voi
+
+    # Next to the mesh files takes precedence
+    mesh_voi = _touch(mesh_dir / 'salas_voi')
+    assert TribsSpatialManager._find_voi_file(mesh_file, str(output_dir)) == mesh_voi
+    assert TribsSpatialManager._find_voi_file(mesh_file) == mesh_voi
+
+
+def test_parse_cluster_ports():
+    parse = TribsSpatialManager._parse_cluster_ports
+    assert parse('[8080]') == [8080]
+    assert parse('[8081, 8082]') == [8081, 8082]
+    assert parse('"[8080]"') == [8080]  # extra level of quoting left by an env loader
+    assert parse('8080') == [8080]
+    assert parse(None) == [8081, 8082, 8083, 8084]
+    assert parse('not json') == [8081, 8082, 8083, 8084]
+    assert parse('["a"]') == [8081, 8082, 8083, 8084]
+
+
+def _file_entry(variable, hours, kind='d', legend=True, value_range=(0.5, 2.5)):
+    stamp = f'{int(hours):04d}_00{kind}' if hours is not None else None
+    name = f'abc-salas_salas-{stamp}_{variable}' if stamp else 'abc-salas'
+    entry = dict(
+        variable=variable, output_file=f'/out/salas.{stamp}' if stamp else None, hours=hours, kind=kind,
+        gltf=f'/tmp/x/gltf/{name}.glb', legend=f'/tmp/x/gltf/{name}_legend.png' if legend else None,
+    )
+    if value_range is not None:  # None mimics files entries written before the range was recorded
+        entry.update(min=value_range[0], max=value_range[1])
+    return entry
+
+
+URL_DIR = 'fdb/fc/gltf'
+
+
+def test_build_gltf_variables():
+    files = [  # unsorted, Nwt missing the middle time step, Mu without legends
+        _file_entry('Mu', 20, legend=False), _file_entry('Nwt', 20), _file_entry('Mu', 0, legend=False),
+        _file_entry('Nwt', 0), _file_entry('Mu', 10, legend=False),
+    ]
+    variables = TribsSpatialManager._build_gltf_variables(
+        files, URL_DIR, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=168
+    )
+    assert [v['name'] for v in variables] == ['Mu', 'Nwt']
+    mu, nwt = variables
+    assert mu['start'] == '2004-06-01T00:00:00Z'
+    assert mu['end'] == '2004-06-01T20:00:00Z'
+    assert mu['step_hours'] == 10
+    assert [t['hours'] for t in mu['timesteps']] == [0, 10, 20]
+    assert [t['time'] for t in mu['timesteps']] == [
+        '2004-06-01T00:00:00Z', '2004-06-01T10:00:00Z', '2004-06-01T20:00:00Z'
+    ]
+    assert mu['timesteps'][1]['url'] == 'fdb/fc/gltf/abc-salas_salas-0010_00d_Mu.glb'
+    assert mu['timesteps'][1]['legend'] is None
+    assert (mu['min'], mu['max']) == (0.5, 2.5)
+    # Nwt: step derived from the files that exist (20 h), not the fallback
+    assert [t['hours'] for t in nwt['timesteps']] == [0, 20]
+    assert nwt['step_hours'] == 20
+    assert nwt['timesteps'][0]['legend'] == 'fdb/fc/gltf/abc-salas_salas-0000_00d_Nwt_legend.png'
+    json.dumps(variables)
+
+
+def test_build_gltf_variables_without_start_date():
+    files = [_file_entry('Mu', 10), _file_entry('Mu', 0)]
+    variables = TribsSpatialManager._build_gltf_variables(files, URL_DIR)
+    assert variables[0]['start'] is None
+    assert variables[0]['end'] is None
+    assert variables[0]['step_hours'] == 10
+    assert [t['hours'] for t in variables[0]['timesteps']] == [0, 10]
+    assert all(t['time'] is None for t in variables[0]['timesteps'])
+
+
+def test_build_gltf_variables_single_timestep_uses_fallback_step():
+    files = [_file_entry('Mu', 700, kind='i')]
+    variables = TribsSpatialManager._build_gltf_variables(
+        files, URL_DIR, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=10.0
+    )
+    assert variables[0]['start'] == variables[0]['end'] == '2004-06-30T04:00:00Z'
+    assert variables[0]['step_hours'] == 10.0
+    assert TribsSpatialManager._build_gltf_variables(files, URL_DIR)[0]['step_hours'] is None
+
+
+def test_build_gltf_variables_static_entry():
+    files = [_file_entry('Elevation', None)]
+    variables = TribsSpatialManager._build_gltf_variables(files, URL_DIR, start_date=datetime.datetime(2004, 6, 1))
+    assert variables == [dict(
+        name='Elevation', label='Elevation', units=None, tier=None, description='', factor=1.0,
+        start=None, end=None, step_hours=None, min=0.5, max=2.5,
+        timesteps=[dict(hours=None, time=None, url='fdb/fc/gltf/abc-salas.glb',
+                        legend='fdb/fc/gltf/abc-salas_legend.png')],
+    )]
+    assert TribsSpatialManager._build_gltf_variables([], URL_DIR) == []
+
+
+def test_build_gltf_variables_with_variable_kind():
+    """With a variable table, entries carry the sheet's label, units and tier and a display-unit range."""
+    files = [
+        _file_entry('AvSM', 0, value_range=(0.1, 0.9)), _file_entry('Mystery', 0),
+        _file_entry('AvSnSub', 0, value_range=(0.0, 2.0)),
+    ]
+    variables = TribsSpatialManager._build_gltf_variables(files, URL_DIR, variable_kind='integrated')
+    av_sm, mystery, snow = variables
+    assert (av_sm['label'], av_sm['units'], av_sm['tier']) == (
+        'Mean Surface Soil Moisture (Top 10 cm)', '% saturation', 'priority'
+    )
+    assert (av_sm['min'], av_sm['max'], av_sm['factor']) == (10.0, 90.0, 100.0)
+    assert av_sm['description'].startswith('Time-averaged relative saturation')
+    assert av_sm['name'] == 'AvSM'  # the layer key stays the raw column name
+    # A column the sheet does not list keeps its name, with no units, tier or conversion
+    assert (mystery['label'], mystery['units'], mystery['tier'], mystery['factor']) == ('Mystery', None, None, 1.0)
+    assert (mystery['min'], mystery['max']) == (0.5, 2.5)
+    # AvSnSub is only in the mrf table, so under 'integrated' it is unknown
+    assert snow['tier'] is None and (snow['min'], snow['max']) == (0.0, 2.0)
+    json.dumps(variables)
+
+
+def test_build_gltf_variables_without_value_range():
+    """Files entries written before min/max were recorded still group; the range is reported as None."""
+    files = [_file_entry('Mu', 10, value_range=None), _file_entry('Mu', 0, value_range=None)]
+    variables = TribsSpatialManager._build_gltf_variables(files, URL_DIR)
+    assert variables[0]['min'] is None and variables[0]['max'] is None
+    assert [t['hours'] for t in variables[0]['timesteps']] == [0, 10]
+
+
+def test_build_gltf_variables_from_mesh_output(files_dir, tmp_path):
+    """End to end over the tin fixture: five time-dynamic files, 10 hours apart."""
+    from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
+
+    layers_dir = files_dir / 'spatial_manager' / 'layers' / 'tin'
+    output_files = sorted(str(p) for p in (layers_dir / 'output').glob('salas.*_00d'))
+    assert len(output_files) == 5
+    tmv = tRIBSMeshViz(mesh_basename=layers_dir / 'salas', mesh_epsg=32613, output_files=output_files)
+    meta = tmv.to_gltf(str(tmp_path / 'abc-salas'), output_variables=['S'], generate_legend=True)
+
+    variables = TribsSpatialManager._build_gltf_variables(
+        meta['files'], URL_DIR, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=168
+    )
+    assert len(variables) == 1
+    s = variables[0]
+    assert s['name'] == 'S'
+    assert [t['hours'] for t in s['timesteps']] == [0, 10, 20, 30, 40]
+    assert s['step_hours'] == 10
+    assert s['start'] == '2004-06-01T00:00:00Z'
+    assert s['end'] == '2004-06-02T16:00:00Z'
+    assert s['timesteps'][0]['url'] == 'fdb/fc/gltf/abc-salas_salas-0000_00d_S.glb'
+    # One legend per variable, scaled over all time steps and shared by every time step
+    assert all(t['legend'] == 'fdb/fc/gltf/abc-salas_S_legend.png' for t in s['timesteps'])
+    assert all(os.path.exists(tmp_path / os.path.basename(t['url'])) for t in s['timesteps'])
