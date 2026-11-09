@@ -17,6 +17,8 @@ def test_is_tribs_variable_output_file(tmp_path):
     # Companion files that are not spatial variable output
     companions = ['__meta__.json', 'salas_voi', 'salas_area', 'salas_reach', 'salas_width',
                   'x.gltf', 'x.glb', 'x_legend.png']
+    # Other tRIBS output that is not spatial variable output (same OUTFILENAME base, different extension)
+    companions += ['salas.pixel', 'salas.mrf', 'salas.rft']
     for name in companions:
         assert not TribsSpatialManager._is_tribs_variable_output_file(_touch(tmp_path / name)), name
     # Directories
@@ -51,9 +53,21 @@ def test_parse_cluster_ports():
     assert parse('[8081, 8082]') == [8081, 8082]
     assert parse('"[8080]"') == [8080]  # extra level of quoting left by an env loader
     assert parse('8080') == [8080]
+    assert parse('["8080", 8081]') == [8080, 8081]  # digit strings are ports too (the app's own parsers accept them)
+    assert parse('[1, 65535]') == [1, 65535]
     assert parse(None) == [8081, 8082, 8083, 8084]
     assert parse('not json') == [8081, 8082, 8083, 8084]
     assert parse('["a"]') == [8081, 8082, 8083, 8084]
+    # JSON booleans are ints in Python; they must not become ports 1/0, and the cluster needs at least one port
+    assert parse('true') == [8081, 8082, 8083, 8084]
+    assert parse('[true]') == [8081, 8082, 8083, 8084]
+    assert parse('[8080, false]') == [8081, 8082, 8083, 8084]
+    assert parse('[]') == [8081, 8082, 8083, 8084]
+    assert parse('[0]') == [8081, 8082, 8083, 8084]
+    assert parse('[65536]') == [8081, 8082, 8083, 8084]
+    assert parse('[70000]') == [8081, 8082, 8083, 8084]
+    assert parse('[8080.0]') == [8081, 8082, 8083, 8084]  # not an int
+    assert parse('{"a": 1}') == [8081, 8082, 8083, 8084]
 
 
 def _file_entry(variable, hours, kind='d', legend=True, value_range=(0.5, 2.5)):

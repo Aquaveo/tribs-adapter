@@ -102,16 +102,22 @@ class TribsSpatialManager(ResourceSpatialManager):
     def _parse_cluster_ports(value, default=(8081, 8082, 8083, 8084)):
         """Parse the GEOSERVER_CLUSTER_PORTS environment value (a JSON list of ints, e.g. "[8080]").
 
-        Tolerates a single port ("8080") and an extra level of quoting ('"[8080]"') that some env loaders leave in
-        place; anything else falls back to the default ports.
+        Tolerates a single port ("8080"), ports given as digit strings (["8080"]) and an extra level of quoting
+        ('"[8080]"') that some env loaders leave in place. Anything else (not JSON, an empty list, booleans, or values
+        that are not ports in 1-65535) falls back to the default ports.
         """
         try:
             ports = json.loads(value)
             if isinstance(ports, str):  # e.g. '"[8080]"' -> '[8080]'
                 ports = json.loads(ports)
-            if isinstance(ports, int):
+            if isinstance(ports, int) and not isinstance(ports, bool):  # e.g. '8080' -> [8080]
                 ports = [ports]
-            ports = [int(p) for p in ports]
+            if not isinstance(ports, list) or not ports:
+                raise ValueError('expected a non-empty list of ports')
+            ports = [int(p) if isinstance(p, str) and p.isdigit() else p for p in ports]  # e.g. ["8080"]
+            # bool is a subclass of int: JSON true/false must not become ports 1/0
+            if not all(isinstance(p, int) and not isinstance(p, bool) and 0 < p < 65536 for p in ports):
+                raise ValueError('ports must be integers between 1 and 65535')
         except (json.JSONDecodeError, TypeError, ValueError):
             log.warning(f'Invalid GEOSERVER_CLUSTER_PORTS value {value!r}. Using default ports {list(default)}.')
             return list(default)

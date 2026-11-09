@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import pytest
 import tempfile
+import warnings
 import numpy as np
 
 gltf_files = [
@@ -383,6 +384,19 @@ def test_interpolate_array(tmv_factory):
     assert tmv._interpolate_array([1.0, 3.0, None, 2.0], value_range=(0.0, 4.0)) == [0.25, 0.75, None, 0.5]
     assert tmv._interpolate_array([-1.0, 9.0], value_range=(0.0, 4.0)) == [0.0, 1.0]
     assert tmv._interpolate_array([5.0, None], value_range=(5.0, 5.0)) == [0.0, None]
+
+
+def test_interpolate_array_without_values(tmv_factory):
+    tmv = tmv_factory('salas', '32613')
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')  # no "All-NaN slice encountered" from nanmin/nanmax
+        # A variable missing from every cell: every cell is "no value", with or without a range
+        assert tmv._interpolate_array([None, None]) == [None, None]
+        assert tmv._interpolate_array([None, None], value_range=(0.0, 4.0)) == [None, None]
+        assert tmv._interpolate_array([]) == []
+    # A range missing either bound is the same as no range: the values set it
+    assert tmv._interpolate_array([1.0, 3.0, None], value_range=(None, None)) == [0.0, 1.0, None]
+    assert tmv._interpolate_array([1.0, 3.0, None], value_range=(0.0, None)) == [0.0, 1.0, None]
 
 
 def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory):

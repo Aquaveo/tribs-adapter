@@ -1279,13 +1279,17 @@ class tRIBSMeshViz:
         return gltf
 
     def _interpolate_array(self, arr, value_range: tuple = None):
-        """Normalize values to [0, 1] over ``value_range`` (min, max), or over the values themselves when not given.
+        """Normalize values to [0, 1] over ``value_range`` (min, max), or over the values themselves when it is not
+        given or either of its bounds is None.
 
-        None values stay None. Values outside of ``value_range`` are clipped.
+        None values stay None. Values outside of ``value_range`` are clipped. When there is not a single finite
+        value, every entry is None (the cells are drawn as "no value").
         """
         arr = np.array(arr)
         arr = np.where(arr == None, np.nan, arr).astype(np.float64)  # NOQA: E711 - arr is None does not work here.
-        if value_range is None:
+        if not np.isfinite(arr).any():  # Nothing to normalize (e.g. a variable missing from every cell)
+            return [None] * len(arr)
+        if value_range is None or None in value_range:
             min_val = np.nanmin(arr)
             max_val = np.nanmax(arr)
         else:
@@ -1407,7 +1411,8 @@ def parse_args():  # pragma: no cover
     parser.add_argument('-d', '--debug', default=False, action='store_true', help='Enable debug logging.')
     parser.add_argument('--voi', default=None, help='Path to the tRIBS _voi file (defaults to <mesh>_voi if present).')
     parser.add_argument(
-        '-v', '--variables', nargs='*', default=None, help='Output variables to visualize (default: all).'
+        '-v', '--variables', action='append', default=None,
+        help='Output variable to visualize; repeat the option for several (default: all).'
     )
     parser.add_argument('--legend', default=False, action='store_true', help='Also write legend images.')
     parser.add_argument(
