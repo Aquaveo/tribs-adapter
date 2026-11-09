@@ -1,7 +1,13 @@
 import datetime
 import json
 import os
+import shutil
+from unittest import mock
 
+import pytest
+
+from tribs_adapter.common.dataset_types import DatasetTypes
+from tribs_adapter.services import tribs_spatial_manager as tsm_module
 from tribs_adapter.services.tribs_spatial_manager import TribsSpatialManager
 
 
@@ -198,3 +204,224 @@ def test_build_gltf_variables_from_mesh_output(files_dir, tmp_path):
     # One legend per variable, scaled over all time steps and shared by every time step
     assert all(t['legend'] == 'fdb/fc/gltf/abc-salas_S_legend.png' for t in s['timesteps'])
     assert all(os.path.exists(tmp_path / os.path.basename(t['url'])) for t in s['timesteps'])
+
+
+# --- create_layer_for_dataset: glTF output datasets -----------------------------------------------------------------
+# The branch wires the linked realization's node file dataset, STARTDATE and SPOPINTRVL into the glTF viz. The output
+# writer (create_tribs_tin_layer, covered by the intermediate tests on real files) is replaced by a spy; _build_gltf_viz
+# runs for real so the assertions are on the viz the dataset ends up with.
+
+
+@pytest.fixture
+def tsm():
+    return TribsSpatialManager(mock.MagicMock(), reload_ports=[8080])
+
+
+def _output_dataset(path, dataset_type=DatasetTypes.TRIBS_OUT_TIME_INTEGRATED, start_date=None, spopintrvl=6,
+                    linked=True):
+    dataset = mock.MagicMock()
+    dataset.id = 'ds-1'
+    dataset.dataset_type = dataset_type
+    dataset.file_collection_client.path = str(path)
+    dataset.file_collection.file_database_id = 'fdb'
+    dataset.file_collection.id = 'fc'
+    dataset.linked_realizations = []
+    if linked:
+        realization = mock.MagicMock()
+        realization.id = 'real-1'
+        realization.input_file.files_and_pathnames.mesh_generation.INPUTDATAFILE.resource_id = 'node-ds'
+        realization.input_file.run_parameters.time_variables.STARTDATE = start_date
+        realization.input_file.run_parameters.time_variables.SPOPINTRVL = spopintrvl
+        dataset.linked_realizations = [realization]
+    return dataset
+
+
+def _session_with_node_file_dataset():
+    node_file_dataset = mock.MagicMock()
+    session = mock.MagicMock()
+    session.query.return_value.get.return_value = node_file_dataset
+    return session, node_file_dataset
+
+
+def _gltf_meta(*entries):
+    return dict(gltfs=[], origin=[-105.0, 40.0, 1500.0], extents=[-105.1, 39.9, -104.9, 40.1], files=list(entries))
+
+
+def _patch_tin_layer_writer(mocker, *entries):
+    """Replace create_tribs_tin_layer with a spy that writes the (empty) files its metadata names into the output
+    dataset's ``gltf`` directory, as the real writer does, and returns that metadata."""
+    meta = _gltf_meta(*entries)
+
+    def write(node_file_dataset, mesh_epsg, output_dataset=None, output_variables=None, variable_kind=None):
+        gltf_dir = os.path.join(output_dataset.file_collection_client.path, 'gltf')
+        os.makedirs(gltf_dir, exist_ok=True)
+        for entry in meta['files']:
+            for path in (entry['gltf'], entry['legend']):
+                if path:
+                    open(os.path.join(gltf_dir, os.path.basename(path)), 'w').close()
+        return meta
+
+    return mocker.patch.object(TribsSpatialManager, 'create_tribs_tin_layer', side_effect=write)
+
+
+def _viz_set_on(dataset):
+    dataset.set_attribute.assert_called_once()
+    name, viz = dataset.set_attribute.call_args.args
+    assert name == 'viz'
+    return viz
+
+
+def test_create_layer_for_time_integrated_dataset_wires_the_realization_into_the_viz(tsm, tmp_path, mocker):
+    dataset = _output_dataset(tmp_path, start_date=datetime.datetime(2004, 6, 1), spopintrvl=6)
+    session, node_file_dataset = _session_with_node_file_dataset()
+    create = _patch_tin_layer_writer(mocker, _file_entry('Z', 0, kind='i'))
+
+    tsm.create_layer_for_dataset(dataset, 26913, session)
+
+    # The mesh comes from the realization's INPUTDATAFILE dataset and the output is rendered with the integrated table
+    session.query.return_value.get.assert_called_once_with('node-ds')
+    create.assert_called_once_with(
+        node_file_dataset, mesh_epsg=26913, output_dataset=dataset, variable_kind='integrated'
+    )
+    viz = _viz_set_on(dataset)
+    assert viz['type'] == 'gltf'
+    assert viz['url'] == [f'{URL_DIR}/abc-salas_salas-0000_00i_Z.glb']
+    assert viz['legend'] == [f'{URL_DIR}/abc-salas_salas-0000_00i_Z_legend.png']
+    (z,) = viz['variables']
+    assert (z['name'], z['tier'], z['label']) == ('Z', 'priority', 'Elevation')
+    # STARTDATE anchors the time steps and SPOPINTRVL is the step of a single-file variable
+    assert z['timesteps'][0]['time'] == '2004-06-01T00:00:00Z'
+    assert (z['start'], z['step_hours']) == ('2004-06-01T00:00:00Z', 6)
+    session.commit.assert_called_once()
+
+
+def test_create_layer_for_time_integrated_dataset_without_a_parsed_startdate(tsm, tmp_path, mocker, caplog):
+    """An unparsed STARTDATE (the raw card text) is logged and the variables keep only their hours."""
+    dataset = _output_dataset(tmp_path, start_date='06/01/2004/00/00', spopintrvl=6)
+    session, _ = _session_with_node_file_dataset()
+    _patch_tin_layer_writer(mocker, _file_entry('Z', 0, kind='i'), _file_entry('Z', 10, kind='i'))
+
+    with caplog.at_level('WARNING', logger='tribs_adapter.services.tribs_spatial_manager'):
+        tsm.create_layer_for_dataset(dataset, 26913, session)
+
+    assert any('STARTDATE' in r.message and 'real-1' in r.message for r in caplog.records)
+    (z,) = _viz_set_on(dataset)['variables']
+    assert [t['hours'] for t in z['timesteps']] == [0, 10]
+    assert all(t['time'] is None for t in z['timesteps'])
+    assert (z['start'], z['end'], z['step_hours']) == (None, None, 10)
+    session.commit.assert_called_once()
+
+
+def test_create_layer_for_legacy_time_dynamic_dataset_has_no_variable_table(tsm, tmp_path, mocker):
+    dataset = _output_dataset(tmp_path, dataset_type=DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
+                              start_date=datetime.datetime(2004, 6, 1))
+    session, node_file_dataset = _session_with_node_file_dataset()
+    create = _patch_tin_layer_writer(mocker, _file_entry('Nwt', 0, kind='d'))
+
+    tsm.create_layer_for_dataset(dataset, 26913, session)
+
+    create.assert_called_once_with(node_file_dataset, mesh_epsg=26913, output_dataset=dataset, variable_kind=None)
+    (nwt,) = _viz_set_on(dataset)['variables']
+    assert (nwt['name'], nwt['label'], nwt['units'], nwt['tier']) == ('Nwt', 'Nwt', None, None)
+
+
+def test_create_layer_for_output_dataset_requires_a_linked_realization(tsm, tmp_path, mocker):
+    dataset = _output_dataset(tmp_path, linked=False)
+    session, _ = _session_with_node_file_dataset()
+    create = mocker.patch.object(TribsSpatialManager, 'create_tribs_tin_layer')
+
+    with pytest.raises(ValueError, match='requires a linked Realization.*ds-1'):
+        tsm.create_layer_for_dataset(dataset, 26913, session)
+
+    create.assert_not_called()
+    dataset.set_attribute.assert_not_called()
+    session.commit.assert_not_called()
+
+
+# --- create_tribs_czml_layer: per-variable metadata ------------------------------------------------------------------
+# Real mrf/qout/pixel files from the czml_converters fixtures; the CZML generators are spies, so the tests check which
+# variables become layers, how each is described, and the legend factor each generator is given.
+
+SIMPLE_FILES = os.path.join('czml_converters', 'simple_files')
+
+
+def _czml_dataset(path, files_dir, dataset_type, data_file):
+    shutil.copy(files_dir / SIMPLE_FILES / data_file, path / data_file)
+    dataset = mock.MagicMock()
+    dataset.id = 'ds-1'
+    dataset.dataset_type = dataset_type
+    dataset.file_collection_client.path = str(path)
+    realization = mock.MagicMock()
+    time_variables = realization.input_file.run_parameters.time_variables
+    time_variables.STARTDATE = datetime.datetime(2004, 6, 1)
+    time_variables.RUNTIME = 24
+    time_variables.OPINTRVL = 1
+    realization.input_file.files_and_pathnames.mesh_generation.INPUTDATAFILE.resource_id = 'node-ds'
+    dataset.linked_realizations = [realization]
+    session, node_file_dataset = _session_with_node_file_dataset()
+    node_file_dataset.file_collection_client.path = str(files_dir / SIMPLE_FILES)  # holds simple.nodes
+    return dataset, session
+
+
+def _generated(spy):
+    """(variable, czml file name, legend_factor) of each CZML the spy was asked to write, in order."""
+    return [(c.args[7], os.path.basename(c.args[5]), c.kwargs['legend_factor']) for c in spy.call_args_list]
+
+
+def test_create_tribs_czml_layer_for_mrf_offers_the_sheet_variables(tsm, tmp_path, files_dir, mocker):
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_MRF, 'simple.mrf')
+    (tmp_path / 'czml').mkdir()  # a previous visualization
+    generate = mocker.patch.object(tsm_module, 'generate_czml_for_mrf_and_rft_files')
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    # Priority variables first, then secondary; RainMax, RainMin and FState are hidden by the table
+    names = [v['name'] for v in meta['variables']]
+    assert names == ['MAP', 'MSMRt', 'MDGW', 'Srf', 'MSM100', 'MSMU']
+    assert [v['tier'] for v in meta['variables']] == ['priority'] * 3 + ['secondary'] * 3
+    by_name = {v['name']: v for v in meta['variables']}
+    assert (by_name['MDGW']['label'], by_name['MDGW']['units'], by_name['MDGW']['factor']) == \
+        ('Depth to Groundwater', 'm', 0.001)
+    assert (by_name['MSMRt']['units'], by_name['MSMRt']['factor']) == ('% saturation', 100.0)
+    assert by_name['MAP']['description']
+    # One CZML per offered variable, legend ticks in display units
+    assert _generated(generate) == [
+        ('MAP', 'ds-1-MAP.czml', 1.0), ('MSMRt', 'ds-1-MSMRt.czml', 100.0), ('MDGW', 'ds-1-MDGW.czml', 0.001),
+        ('Srf', 'ds-1-Srf.czml', 1.0), ('MSM100', 'ds-1-MSM100.czml', 100.0), ('MSMU', 'ds-1-MSMU.czml', 100.0),
+    ]
+    assert all(c.kwargs['srid'] == 32612 and c.args[6] == 'ds-1' for c in generate.call_args_list)
+    # The old czml directory is replaced and the extent comes from the node file
+    dataset.file_collection_client.delete_item.assert_called_once_with('czml')
+    dataset.file_collection_client.add_item.assert_called_once()
+    assert dataset.file_collection_client.add_item.call_args.args[0].endswith('czml')
+    assert meta['origin'] is not None and len(meta['extents']) == 4
+    json.dumps(meta)
+
+
+def test_create_tribs_czml_layer_for_qout_keeps_the_unit_suffix_in_the_layer_name(tsm, tmp_path, files_dir, mocker):
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    generate = mocker.patch.object(tsm_module, 'generate_czml_for_qout_files')
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    # Hlev is hidden by the table; the layer keeps the file's column name, the label and units come from the table
+    (qstrm,) = meta['variables']
+    assert (qstrm['name'], qstrm['label'], qstrm['units'], qstrm['tier'], qstrm['factor']) == \
+        ('Qstrm_m3-s', 'Streamflow', 'm³/s', 'priority', 1.0)
+    assert _generated(generate) == [('Qstrm_m3-s', 'ds-1-Qstrm_m3-s.czml', 1.0)]
+    dataset.file_collection_client.delete_item.assert_not_called()
+
+
+def test_create_tribs_czml_layer_for_pixel_keeps_every_variable_with_its_unit_token(tsm, tmp_path, files_dir, mocker):
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_PIXEL, 'simple.pixel')
+    generate = mocker.patch.object(tsm_module, 'generate_czml_for_pixel_files')
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    # Pixel variables are not in the sheet: all stay visible, named by the header, with the unit token translated
+    assert [v['name'] for v in meta['variables']] == ['Nwt_mm', 'Nf_mm', 'Nt_mm', 'Mu_mm', 'Mi_mm']
+    assert all((v['tier'], v['factor'], v['description']) == (None, 1.0, '') for v in meta['variables'])
+    nwt = meta['variables'][0]
+    assert (nwt['label'], nwt['units']) == ('Nwt', 'mm')
+    assert [g[0] for g in _generated(generate)] == ['Nwt_mm', 'Nf_mm', 'Nt_mm', 'Mu_mm', 'Mi_mm']
+    assert all(g[2] == 1.0 for g in _generated(generate))
