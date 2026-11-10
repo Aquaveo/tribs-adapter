@@ -466,6 +466,37 @@ def test_variable_labels_title_and_scale_the_legends(tmv_factory, mocker, tmp_pa
     assert generate_legend.call_args[1] == dict(title=None)
 
 
+def test_negative_factor_colors_cells_by_display_value(tmv_factory, tmp_path):
+    """With a negative factor the legend runs from the smallest to the largest display value, so the cells are colored
+    in reverse: the smallest file value (largest display value) gets the top of the ramp."""
+    output_file = os.path.join(tmp_path, 'scaled.0000_00d')
+    with open(output_file, 'w') as f:
+        f.write("ID,Foo\n0,10\n1,40\n2,20\n")
+    mesh_basename = 'salas_outputs'
+    tmv = tmv_factory(mesh_basename, '32613')
+    tmv.output_files = [output_file]
+    first_vertex = np.r_[0, np.cumsum(np.bincount(tmv._build_voronoi_geometry()['vertex_cell']))[:-1]]
+
+    def cell_uv(variable_labels):
+        base = os.path.join(tmp_path, mesh_basename)
+        meta = tmv.to_gltf(base, '32613', output_variables=['Foo'], variable_labels=variable_labels)
+        return _read_gltf_accessors(meta['files'][0]['gltf'])[3][first_vertex]
+
+    positive = cell_uv({'Foo': dict(factor=10)})
+    np.testing.assert_allclose(positive[:3], [[0.0, 0.0], [0.0, 1.0], [0.0, 1 / 3]], atol=1e-6)
+
+    negative = cell_uv({'Foo': dict(factor=-10)})  # display values -100, -400, -200
+    np.testing.assert_allclose(negative[:3], [[0.0, 1.0], [0.0, 0.0], [0.0, 2 / 3]], atol=1e-6)
+    assert (negative[3:] == 1.0).all()  # Cells without a value stay transparent
+
+    # A constant variable stays at the bottom of the ramp, where its legend puts it
+    with open(output_file, 'w') as f:
+        f.write("ID,Foo\n0,5\n1,5\n2,5\n")
+    tmv = tmv_factory(mesh_basename, '32613')
+    tmv.output_files = [output_file]
+    np.testing.assert_allclose(cell_uv({'Foo': dict(factor=-10)})[:3], [[0.0, 0.0]] * 3, atol=1e-6)
+
+
 def test_generate_legend_for_values(tmv_factory, files_dir, tmp_path, caplog):
     tmv = tmv_factory('salas', '32613')
     color_ramp_file = os.path.join(files_dir, '..', '..', 'tribs_adapter', 'templates', 'color_ramps', 'RedToBlue.png')

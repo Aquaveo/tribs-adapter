@@ -677,7 +677,8 @@ class tRIBSMeshViz:
                 and the color ramp image embedded as base64 data URIs (about a third larger).
             variable_labels: Optional ``{variable: {'title': str, 'factor': float}}`` for the legends: the title is
                 drawn above the legend and the tick values are the file values times ``factor`` (display units).
-                The glTF files and the ``min``/``max`` in ``files`` are always in file units.
+                Cells are colored by display value: with a negative ``factor`` the color ramp is reversed, so the
+                colors match the legend. The ``min``/``max`` in ``files`` are always in file units.
 
         Returns:
             Dictionary with metadata about the generated glTF files::
@@ -759,10 +760,14 @@ class tRIBSMeshViz:
                 if time_stamp is None:
                     log.warning(f"Could not parse a time stamp out of output file name: {output_file}")
                 for variable in self._output_file_variables(output_file, output_variables):
+                    factor = (variable_labels or {}).get(variable, {}).get('factor', 1.0)
+                    value_range = value_ranges.get(variable)
+                    # A constant variable sits at the bottom of the ramp and of its legend, whatever the factor
+                    reverse = factor < 0 and value_range is not None and value_range[0] != value_range[1]
                     gltf_file_path = Path(f'{gltf_path}_{basefile_name}_{variable}{extension}')
                     gltf, _ = self._build_voronoi_gltf(
                         localized_cells, cell_normals, output_file, variable, color_ramp_file=color_ramp_file,
-                        binary=binary, value_range=value_ranges.get(variable),
+                        binary=binary, value_range=value_range, reverse=reverse,
                     )
                     if gltf is not None:
                         gltf = self._set_materials(gltf)
@@ -790,6 +795,7 @@ class tRIBSMeshViz:
                         continue
                     log.debug(f"Generating legend: {legend_path}")
                     spec = (variable_labels or {}).get(variable, {})
+                    # Display units, low to high (the cells of a negative factor are colored in reverse to match)
                     low, high = sorted(v * spec.get('factor', 1.0) for v in value_ranges[variable])
                     self._generate_legend(low, high, legend_path, color_ramp_file, title=spec.get('title'))
                     for entry in generated_files:
@@ -1060,14 +1066,18 @@ class tRIBSMeshViz:
 
         return [ncx, ncy, ncz], [scx, scy, scz]
 
-    def _values_to_texcoords(self, values, value_range: tuple = None) -> np.ndarray:
+    def _values_to_texcoords(self, values, value_range: tuple = None, reverse: bool = False) -> np.ndarray:
         """Convert raw values (None for no value) to texture coordinates into the color ramp image.
 
         The color ramps are 256x256 images whose colors vary along the v (row) axis in the u=0 column and are fully
         transparent in the u=1 column, so a value maps to (0, normalized value) and "no value" maps to (1, 1).
         ``value_range`` is the (min, max) the values are normalized to; defaults to the range of the values.
+        ``reverse`` runs the ramp from max to min instead, for variables whose display conversion factor is negative
+        (their smallest raw value is their largest display value).
         """
         normalized = self._interpolate_array(values, value_range=value_range)
+        if reverse:
+            normalized = [1.0 - x if x is not None else None for x in normalized]
         return np.array([[0.0, x] if x is not None else [1.0, 1.0] for x in normalized], dtype=np.float32)
 
     def _build_voronoi_gltf(
@@ -1080,6 +1090,7 @@ class tRIBSMeshViz:
         binary: bool = True,
         cell_values: list = None,
         value_range: tuple = None,
+        reverse: bool = False,
     ) -> tuple[pygltflib.GLTF2 | None, list | None]:
         """Build glTF mesh of the Voronoi cells, each cell uniformly colored by one value.
 
@@ -1094,6 +1105,7 @@ class tRIBSMeshViz:
                 file, e.g. the node elevations for the bare mesh.
             value_range: (min, max) the values are colored against, e.g. the range of the variable over all time
                 steps. Defaults to the range of the values in this file.
+            reverse: Color from the top of the ramp (min) to the bottom (max), see ``_values_to_texcoords``.
 
         Returns:
             glTF object and the list of raw cell values (None for cells without a value), or (None, None) if the
@@ -1107,7 +1119,7 @@ class tRIBSMeshViz:
                 return None, None
 
         geometry = self._build_voronoi_geometry()
-        cell_texcoords = self._values_to_texcoords(cell_values, value_range=value_range)
+        cell_texcoords = self._values_to_texcoords(cell_values, value_range=value_range, reverse=reverse)
         vertex_texcoords = cell_texcoords[geometry['vertex_cell']]
         gltf = self._assemble_gltf(
             positions, geometry['triangles'], normals, vertex_texcoords, color_ramp_file, binary=binary

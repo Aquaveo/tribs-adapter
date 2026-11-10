@@ -1,5 +1,6 @@
 from collections import Counter
 from datetime import datetime
+import json
 import numpy as np
 
 from tribs_adapter.common.czml_generator import CZMLGenerator
@@ -238,6 +239,26 @@ def test_get_colors_for_values():
     assert Counter(map(tuple, colors)) == Counter(
         map(tuple, np.array([[255, 255, 255], [255, 255, 255], [127, 127, 255], [0, 0, 255], [0, 0, 255]]))
     )
+
+    # Reversed (negative display factor): the smallest number gets the high end of the ramp
+    colors = CZMLGenerator._get_colors_for_values(numbers, reverse=True)
+    assert colors.tolist() == [[0, 0, 255], [63, 63, 255], [127, 127, 255], [191, 191, 255], [255, 255, 255]]
+
+
+def test_write_czml_negative_legend_factor_colors_by_display_value(tmp_path):
+    """The legend of a negative factor runs from the smallest to the largest display value (white to blue), so the
+    data value with the largest display value has to be the blue one."""
+    czml = CZMLGenerator('test')
+    czml.add_point([0, 0], [-2, -1], 'point', datetime(2021, 1, 1), 2, 1)  # -cm; 20 and 10 mm with factor -10
+    czml.add_polygon([[0, 0], [1, 0], [1, 1], [0, 1]], [-2, -1], 'polygon', datetime(2021, 1, 1), 2, 1)
+    czml.write_czml(str(tmp_path / 'test.czml'), legend=True, legend_factor=-10.0)
+
+    with open(tmp_path / 'test.czml') as f:
+        _, point, polygon = json.load(f)
+    assert [c['rgba'][:3] for c in point['point']['color']] == [[0, 0, 255], [255, 255, 255]]
+    polygon_colors = polygon['polygon']['material']['solidColor']['color']
+    assert [c['rgba'][:3] for c in polygon_colors] == [[0, 0, 255], [255, 255, 255]]
+    assert (tmp_path / 'test_point_legend.png').exists() and (tmp_path / 'test_polygon_legend.png').exists()
 
 
 def test_format_data():
