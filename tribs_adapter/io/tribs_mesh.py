@@ -77,6 +77,9 @@ class tRIBSMeshViz:
     GLB_EXTENSION = '.glb'
     GLTF_EXTENSION = '.gltf'
 
+    # A fan triangle with less (signed) area than this, in the units of the mesh squared, counts as reversed
+    REVERSED_TRIANGLE_AREA = -1e-9
+
     # Color ramp (256x256 PNG) the cells are colored with when the caller does not give one
     DEFAULT_COLOR_RAMP_FILE = os.path.join(
         os.path.dirname(__file__), '..', 'templates', 'color_ramps', 'TopoAtlasShader.png'
@@ -108,7 +111,11 @@ class tRIBSMeshViz:
             output_files = []
         self.mesh_basename = Path(mesh_basename) if isinstance(mesh_basename, str) else mesh_basename
         self.mesh_epsg = int(mesh_epsg) if isinstance(mesh_epsg, str) else mesh_epsg
-        self.nodes, self.triangles, self.boundary_types = self._read_mesh_arrays(self.mesh_basename)
+        nodes, self.triangles, self.boundary_types = self._read_mesh_arrays(self.mesh_basename)
+        # The x-y of the nodes in full precision, for the cell geometry: float32 (``self.nodes``) is only good to
+        # about 0.1 m at UTM magnitudes, enough to move a node across the edge of its own Voronoi cell.
+        self.node_xy = nodes[:, :2].copy()
+        self.nodes = nodes.astype(np.float32)
         # Fix issue with nodes falling outside the raster bounds and having z values approaching negative infinity,
         # when generating gltf later.
         self.nodes = self._reassign_bad_z_values(self.nodes) if (self.nodes[:, 2] < -1e8).any() else self.nodes
@@ -161,7 +168,7 @@ class tRIBSMeshViz:
     def mesh_domain(self) -> shapely.Geometry:
         """Footprint of the TIN (union of its triangles) as a shapely polygon or multipolygon."""
         if self._mesh_domain is None:
-            xy = self.nodes[:, :2].astype(np.float64)
+            xy = self.node_xy
             corners = xy[self.triangles]
             signed_area = 0.5 * (
                 (corners[:, 1, 0] - corners[:, 0, 0]) * (corners[:, 2, 1] - corners[:, 0, 1])
@@ -195,7 +202,7 @@ class tRIBSMeshViz:
         if inside.all():
             return ids, polygons
 
-        nodes_xy = self.nodes[:, :2].astype(np.float64)
+        nodes_xy = self.node_xy
         kept_ids, kept_polygons, clipped, dropped = [], [], 0, 0
         for node_index, ring, cell, is_inside in zip(ids, polygons, cells, inside):
             if is_inside:
@@ -307,9 +314,7 @@ class tRIBSMeshViz:
             )
 
         # tRIBS node IDs are the row indices of the .nodes file, so the cell centers must coincide with the nodes.
-        center_errors = np.hypot(
-            centers[:, 0] - self.nodes[ids, 0].astype(np.float64), centers[:, 1] - self.nodes[ids, 1].astype(np.float64)
-        )
+        center_errors = np.hypot(centers[:, 0] - self.node_xy[ids, 0], centers[:, 1] - self.node_xy[ids, 1])
         mismatched = int((center_errors > self.VOI_CENTER_TOLERANCE).sum())
         if mismatched:
             raise ValueError(
@@ -394,7 +399,7 @@ class tRIBSMeshViz:
         Returns:
             Node IDs (C,) and list of C polygon vertex arrays (k, 2).
         """
-        xy = self.nodes[:, :2].astype(np.float64)
+        xy = self.node_xy
         centers, valid = self._circumcenters(xy[self.triangles])
         node_triangles = self._node_triangles()
 
@@ -428,6 +433,12 @@ class tRIBSMeshViz:
         the TIN triangle that contains the vertex), and vertices shared by neighboring cells get exactly the same
         elevation, so the surface stays continuous across cell boundaries. The cell center gets the node elevation.
 
+        A fan only covers its cell exactly when the node sees every edge from the inside. Where it does not (a node
+        on or just outside the edge of its cell, or a clipped cell with a degenerate ring) a fan triangle would be
+        reversed and overlap the neighboring cells, so the cell polygon is triangulated on its own instead (see
+        ``_triangulate_ring``). The center vertex of such a cell is still stored, so every cell has ``k + 1``
+        vertices, but no triangle uses it.
+
         Returns:
             Dictionary with ``positions`` (V, 3) float64 array in mesh coordinates, ``triangles`` (F, 3) uint32 array,
             and ``vertex_cell`` (V,) array with the index (into ``self.voronoi['ids']``) of the cell of each vertex.
@@ -437,7 +448,7 @@ class tRIBSMeshViz:
 
         separator()
         log.debug("Building Voronoi cell geometry...")
-        nodes = self.nodes.astype(np.float64)
+        nodes = np.column_stack((self.node_xy, self.nodes[:, 2].astype(np.float64)))
         cell_ids = self.voronoi['ids']
         polygons = self.voronoi['polygons']
         if len(polygons) == 0:
@@ -454,6 +465,8 @@ class tRIBSMeshViz:
         positions, faces, vertex_cell = [], [], []
         vertex_offset = 0
         ring_offset = 0
+        without_fan = 0
+        not_exact = 0
         for cell_index, (node_index, ring) in enumerate(zip(cell_ids, polygons)):
             node = nodes[node_index]
             k = len(ring)
@@ -465,7 +478,13 @@ class tRIBSMeshViz:
             center = vertex_offset
             first = vertex_offset + 1
             j = np.arange(k)
-            faces.append(np.column_stack((np.full(k, center), first + j, first + (j + 1) % k)))
+            ring_triangles = self._triangulate_ring(ring) if self._fan_is_reversed(node[:2], ring) else None
+            if ring_triangles is not None:
+                without_fan += 1
+                faces.append(first + ring_triangles)
+            else:
+                not_exact += self._fan_is_reversed(node[:2], ring)
+                faces.append(np.column_stack((np.full(k, center), first + j, first + (j + 1) % k)))
             vertex_cell.append(np.full(k + 1, cell_index))
             vertex_offset += k + 1
 
@@ -478,7 +497,71 @@ class tRIBSMeshViz:
             f"Voronoi geometry: {len(cell_ids)} cells, {len(self._voronoi_geometry['positions'])} vertices, "
             f"{len(self._voronoi_geometry['triangles'])} triangles."
         )
+        if not_exact:
+            log.warning(
+                f"{not_exact} of {len(cell_ids)} Voronoi cells could not be triangulated exactly (zero-area or "
+                f"self-intersecting cell polygon). They are drawn as a fan around their node, which may overlap the "
+                f"neighboring cells."
+            )
+        if without_fan:
+            log.info(
+                f"Triangulated {without_fan} of {len(cell_ids)} Voronoi cells without their node: the node does not "
+                f"see every edge of the cell from the inside."
+            )
         return self._voronoi_geometry
+
+    @classmethod
+    def _fan_is_reversed(cls, center: np.ndarray, ring: np.ndarray) -> bool:
+        """True if a triangle fan around ``center`` has a triangle wound against the ``ring`` (k, 2).
+
+        A reversed triangle lies (partly) outside of the ring or over another triangle of the fan, so the fan does not
+        cover the ring exactly.
+        """
+        ahead = np.roll(ring, -1, axis=0)
+        areas = 0.5 * (
+            (ring[:, 0] - center[0]) * (ahead[:, 1] - center[1]) - (ring[:, 1] - center[1]) * (ahead[:, 0] - center[0])
+        )
+        if areas.sum() < 0:  # Clockwise ring
+            areas = -areas
+        return bool((areas < cls.REVERSED_TRIANGLE_AREA).any())
+
+    @staticmethod
+    def _triangulate_ring(ring: np.ndarray) -> np.ndarray | None:
+        """Triangulate a polygon using only its own vertices.
+
+        Args:
+            ring: (k, 2) vertices of the polygon, first vertex not repeated.
+
+        Returns:
+            (T, 3) array of indices into ``ring``, wound like the ring, or None if the polygon cannot be triangulated
+            exactly (a zero-area or self-intersecting ring).
+        """
+        index_of = {(x, y): i for i, (x, y) in enumerate(ring.tolist())}
+        try:
+            triangles = shapely.constrained_delaunay_triangles(shapely.Polygon(ring))
+        except shapely.errors.GEOSException:
+            return None
+        corners = shapely.get_coordinates(shapely.get_parts(triangles)).reshape(-1, 4, 2)[:, :3]
+        vertices = [tuple(xy) for triangle in corners.tolist() for xy in triangle]
+        if len(vertices) == 0 or any(xy not in index_of for xy in vertices):
+            return None
+        indices = np.array([index_of[xy] for xy in vertices], dtype=np.int64).reshape(-1, 3)
+
+        def signed_areas(points):
+            return 0.5 * (
+                (points[:, 1, 0] - points[:, 0, 0]) * (points[:, 2, 1] - points[:, 0, 1])
+                - (points[:, 2, 0] - points[:, 0, 0]) * (points[:, 1, 1] - points[:, 0, 1])
+            )
+
+        local = ring - ring[0]  # The shoelace formula loses its precision at UTM magnitudes
+        ahead = np.roll(local, -1, axis=0)
+        ring_area = 0.5 * np.sum(local[:, 0] * ahead[:, 1] - ahead[:, 0] * local[:, 1])
+        if not np.isclose(np.abs(signed_areas(corners)).sum(), abs(ring_area), rtol=1e-6, atol=1e-6):
+            return None  # The triangles do not tile the ring
+        ring_is_ccw = ring_area >= 0
+        flip = (signed_areas(corners) >= 0) != ring_is_ccw
+        indices[flip] = indices[flip][:, ::-1]
+        return indices
 
     def _tin_surface_elevations(self, points: np.ndarray, seed_nodes: np.ndarray) -> np.ndarray:
         """Elevation of x-y points on the TIN surface.
@@ -497,7 +580,7 @@ class tRIBSMeshViz:
         Returns:
             (M,) elevations.
         """
-        nodes = self.nodes.astype(np.float64)
+        nodes = np.column_stack((self.node_xy, self.nodes[:, 2].astype(np.float64)))
         triangles = self.triangles.astype(np.int64)
         node_triangles = self._node_triangles()
 
@@ -832,7 +915,7 @@ class tRIBSMeshViz:
         log.debug(f"Z: min={min_z}, max={max_z}")
 
     def _read_mesh_arrays(self, mesh_basename: Path) -> tuple:
-        """Read mesh files and return nodes and triangles arrays."""
+        """Read mesh files and return the nodes (float64), triangles and node boundary types."""
         log.info(f"Reading tRIBS mesh files for: {mesh_basename}...")
         nodes_path = Path(f"{str(mesh_basename)}.nodes")
         z_path = Path(f"{str(mesh_basename)}.z")
@@ -866,7 +949,7 @@ class tRIBSMeshViz:
             assert len(nodes_list) == nodes_count, "nodes file has incorrect count."
 
             # Create nodes array
-            nodes = np.array(nodes_list, dtype=np.float32)
+            nodes = np.array(nodes_list, dtype=np.float64)
 
         # Read triangles
         with open(tri_path, 'r') as tri_file:

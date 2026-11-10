@@ -4,6 +4,8 @@ import pytest
 import warnings
 import numpy as np
 
+from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
+
 gltf_files = [
     'salas',
     'ms2_s1z1_notree',
@@ -524,11 +526,13 @@ def test_voronoi_vertices_lie_on_tin_surface(tmv_factory):
     is_center[centers] = True
 
     # Cell centers are the nodes themselves
-    np.testing.assert_allclose(positions[centers], tmv.nodes[tmv.voronoi['ids']].astype(np.float64), atol=1e-4)
+    cell_ids = tmv.voronoi['ids']
+    np.testing.assert_allclose(positions[centers, :2], tmv.node_xy[cell_ids], atol=1e-9)  # full precision x-y
+    np.testing.assert_allclose(positions[centers, 2], tmv.nodes[cell_ids, 2].astype(np.float64), atol=1e-4)
 
     # Ring vertices interpolate the TIN surface (independent check with matplotlib's linear TIN interpolator)
     ring = positions[~is_center]
-    nodes = tmv.nodes.astype(np.float64)
+    nodes = np.column_stack((tmv.node_xy, tmv.nodes[:, 2].astype(np.float64)))
     interpolator = mtri.LinearTriInterpolator(mtri.Triangulation(nodes[:, 0], nodes[:, 1], tmv.triangles), nodes[:, 2])
     expected = interpolator(ring[:, 0], ring[:, 1])
     assert not expected.mask.any()  # all vertices inside the TIN for this mesh
@@ -542,6 +546,94 @@ def test_voronoi_vertices_lie_on_tin_surface(tmv_factory):
     np.minimum.at(z_min, inverse, ring[:, 2])
     np.maximum.at(z_max, inverse, ring[:, 2])
     assert (z_max - z_min).max() < 1e-6
+
+
+def _signed_areas(corners):
+    """Signed areas of (T, 3, 2) triangles: positive when counter-clockwise."""
+    return 0.5 * (
+        (corners[:, 1, 0] - corners[:, 0, 0]) * (corners[:, 2, 1] - corners[:, 0, 1])
+        - (corners[:, 2, 0] - corners[:, 0, 0]) * (corners[:, 1, 1] - corners[:, 0, 1])
+    )
+
+
+@pytest.mark.parametrize(
+    'mesh_basename,cells_without_fan',
+    [
+        ('gltf/salas_outputs/salas_outputs', False),
+        ('gltf/ms2_s1z1_notree/ms2_s1z1_notree', False),  # Nodes within float32 rounding of the edge of their cell
+        ('models/examplebasin/Output/Fall1996/voronoi/examplebasin', True),  # Nodes on the edge of their cell
+    ],
+)
+def test_voronoi_triangles_cover_their_cell_exactly(files_dir, mesh_basename, cells_without_fan):
+    """The triangles of a cell tile its polygon: none is reversed (which would put it outside of the cell or over
+    another triangle) and together they have the area of the cell."""
+    tmv = tRIBSMeshViz(os.path.join(files_dir, mesh_basename), mesh_epsg=32613)
+    geometry = tmv._build_voronoi_geometry()
+    triangles = geometry['triangles']
+    areas = _signed_areas(geometry['positions'][:, :2][triangles])
+    assert areas.min() > -1e-9  # Counter-clockwise like the cell rings: no reversed triangle
+
+    triangle_cell = geometry['vertex_cell'][triangles[:, 0]]
+    polygons = tmv.voronoi['polygons']
+    cell_areas = np.array([
+        _signed_areas(np.stack((ring, np.roll(ring, -1, axis=0), np.zeros_like(ring)), axis=1)).sum()
+        for ring in polygons
+    ])
+    triangle_areas = np.bincount(triangle_cell, weights=areas, minlength=len(polygons))
+    np.testing.assert_allclose(triangle_areas, cell_areas, atol=1e-6)
+
+    # Cells the node cannot fan (it does not see every edge from the inside) are triangulated without their node
+    ring_sizes = np.array([len(ring) for ring in polygons])
+    centers = np.r_[0, np.cumsum(ring_sizes + 1)[:-1]]
+    without_fan = (~np.isin(centers, triangles)).sum()
+    assert (without_fan > 0) == cells_without_fan
+    assert without_fan < 0.01 * len(polygons)
+
+
+def test_fan_is_reversed():
+    square = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
+    assert not tRIBSMeshViz._fan_is_reversed(np.array([1.0, 1.0]), square)
+    assert not tRIBSMeshViz._fan_is_reversed(np.array([1.0, 1.0]), square[::-1])  # Clockwise ring
+    assert not tRIBSMeshViz._fan_is_reversed(np.array([1.0, 0.0]), square)  # On an edge: a zero-area triangle is fine
+    assert tRIBSMeshViz._fan_is_reversed(np.array([1.0, -0.1]), square)  # Just outside
+    assert tRIBSMeshViz._fan_is_reversed(np.array([1.0, -0.1]), square[::-1])
+
+
+@pytest.mark.parametrize('clockwise', [False, True])
+def test_triangulate_ring(clockwise):
+    """A concave polygon is triangulated with its own vertices only, wound like the ring."""
+    ring = np.array([[0.0, 0.0], [4.0, 0.0], [4.0, 1.0], [1.0, 1.0], [1.0, 4.0], [0.0, 4.0]])  # L shape, area 7
+    if clockwise:
+        ring = ring[::-1]
+    triangles = tRIBSMeshViz._triangulate_ring(ring)
+    assert triangles.shape == (4, 3)
+    areas = _signed_areas(ring[triangles])
+    assert (areas < 0).all() if clockwise else (areas > 0).all()
+    assert abs(areas.sum()) == pytest.approx(7.0)
+
+
+@pytest.mark.parametrize(
+    'ring', [
+        [[0, 0], [1, 0], [2, 0]],  # Collinear
+        [[0, 0], [2, 0], [1, 0]],  # Zero-area spike
+        [[0, 0], [2, 2], [2, 0], [0, 2]],  # Self-intersecting
+    ]
+)
+def test_triangulate_ring_not_possible(ring):
+    assert tRIBSMeshViz._triangulate_ring(np.array(ring, dtype=np.float64)) is None
+
+
+def test_voronoi_geometry_keeps_the_fan_of_a_cell_that_cannot_be_triangulated(tmv_factory, caplog):
+    """A cell with a self-intersecting polygon does not stop the geometry from being built: it keeps its fan."""
+    tmv = tmv_factory('salas_outputs', '32613')
+    ring = tmv.voronoi['polygons'][0]
+    center = ring.mean(axis=0)
+    tmv.voronoi['polygons'][0] = center + np.array([[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0]]) + 50.0
+
+    with caplog.at_level('WARNING'):
+        geometry = tmv._build_voronoi_geometry()
+    assert '1 of 1681 Voronoi cells could not be triangulated exactly' in caplog.text
+    np.testing.assert_array_equal(geometry['triangles'][:4], [[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 1]])
 
 
 def test_tin_surface_elevations_outside_tin(tmv_factory):
