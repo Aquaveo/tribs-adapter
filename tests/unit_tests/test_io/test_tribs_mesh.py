@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 import pytest
-import tempfile
 import warnings
 import numpy as np
 
@@ -55,12 +54,13 @@ def test_reproject_nodes(tmv_factory):
     np.testing.assert_array_equal(reprojected_nodes, expected_nodes)
 
 
-def test_output_files(tmv_factory):
+def test_output_files(tmv_factory, tmp_path):
     """Test that the output files are used when provided."""
     mesh_basename = 'salas_outputs'
     mesh_epsg = '32613'
     tm = tmv_factory(mesh_basename, mesh_epsg, output_files=['salas.0700_00d'])
-    temp_dir = tempfile.mkdtemp()
+    temp_dir = str(tmp_path / 'one_variable')
+    os.mkdir(temp_dir)
     gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
     meta = tm.to_gltf(gltf_file_base_name, mesh_epsg, output_variables=['Z'])
 
@@ -75,14 +75,16 @@ def test_output_files(tmv_factory):
         gltf=gltf_z_file, legend=None, min=z_min, max=z_max,
     )]
 
-    temp_dir_2 = tempfile.mkdtemp()
+    temp_dir_2 = str(tmp_path / 'unknown_variable')
+    os.mkdir(temp_dir_2)
     gltf2_file_base_name = os.path.join(temp_dir_2, f'{mesh_basename}')
 
     meta2 = tm.to_gltf(gltf2_file_base_name, output_variables=['BadVar'])
     assert len(os.listdir(temp_dir_2)) == 0
     assert meta2['files'] == []
 
-    temp_dir_3 = tempfile.mkdtemp()
+    temp_dir_3 = str(tmp_path / 'all_variables')
+    os.mkdir(temp_dir_3)
     gltf3_file_base_name = os.path.join(temp_dir_3, f'{mesh_basename}')
 
     meta3 = tm.to_gltf(gltf3_file_base_name, generate_legend=True)
@@ -119,7 +121,7 @@ def test_output_files(tmv_factory):
     assert os.path.exists(f"{gltf3_file_base_name}_salas-0700_00d_Srf.glb")
 
 
-def test_given_color_ramp_file(tmv_factory, files_dir):
+def test_given_color_ramp_file(tmv_factory, files_dir, tmp_path):
     """Test that the color ramp file is used when provided."""
     import base64
     import pygltflib
@@ -128,8 +130,7 @@ def test_given_color_ramp_file(tmv_factory, files_dir):
     mesh_epsg = '32613'
     tmv = tmv_factory(mesh_basename, mesh_epsg, output_files=['salas.0700_00d'])
 
-    temp_dir = tempfile.mkdtemp()
-    gltf_file_base_name = os.path.join(temp_dir, f'{mesh_basename}')
+    gltf_file_base_name = os.path.join(tmp_path, f'{mesh_basename}')
     gltf_file = f'{gltf_file_base_name}_salas-0700_00d_Z.gltf'
 
     color_ramp_file = os.path.join(
@@ -316,12 +317,11 @@ def test_compute_voronoi_from_tin(tmv_factory):
     assert len(tmv.voronoi['ids']) == len(ids)
 
 
-def test_voronoi_gltf_values_join_by_id(tmv_factory):
+def test_voronoi_gltf_values_join_by_id(tmv_factory, tmp_path):
     """Each Voronoi cell is a fan of triangles with a single color given by the value with the cell's node ID."""
     mesh_basename = 'salas_outputs'
     tmv = tmv_factory(mesh_basename, '32613', output_files=['salas.0700_00d'])
-    temp_dir = tempfile.mkdtemp()
-    gltf_file_base_name = os.path.join(temp_dir, mesh_basename)
+    gltf_file_base_name = os.path.join(tmp_path, mesh_basename)
     tmv.to_gltf(gltf_file_base_name, '32613', output_variables=['ID'], generate_legend=True)
 
     gltf_file = f'{gltf_file_base_name}_salas-0700_00d_ID.glb'
@@ -353,17 +353,16 @@ def test_voronoi_gltf_values_join_by_id(tmv_factory):
     assert not (texcoords[:, 0] == 1.0).any()
 
 
-def test_voronoi_gltf_missing_values_are_transparent(tmv_factory, gltf_dir):
+def test_voronoi_gltf_missing_values_are_transparent(tmv_factory, tmp_path):
     """Cells whose node ID has no row in the output file get the transparent texture coordinate."""
-    output_file = os.path.join(tempfile.mkdtemp(), 'partial.0000_00d')
+    output_file = os.path.join(tmp_path, 'partial.0000_00d')
     with open(output_file, 'w') as f:
         f.write("ID,Foo\n1,10\n0,20\n999999,30\n")  # Rows out of node order, plus an ID outside of the mesh
 
     mesh_basename = 'salas_outputs'
     tmv = tmv_factory(mesh_basename, '32613')
     tmv.output_files = [output_file]
-    temp_dir = tempfile.mkdtemp()
-    gltf_file_base_name = os.path.join(temp_dir, mesh_basename)
+    gltf_file_base_name = os.path.join(tmp_path, mesh_basename)
     tmv.to_gltf(gltf_file_base_name, '32613', output_variables=['Foo'])
 
     _, _, _, texcoords = _read_gltf_accessors(f'{gltf_file_base_name}_partial-0000_00d_Foo.glb')
@@ -399,9 +398,10 @@ def test_interpolate_array_without_values(tmv_factory):
     assert tmv._interpolate_array([1.0, 3.0, None], value_range=(0.0, None)) == [0.0, 1.0, None]
 
 
-def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory):
+def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory, tmp_path):
     """A variable's colors and legend span its range over every output file, not the range of each file."""
-    output_dir = tempfile.mkdtemp()
+    output_dir = str(tmp_path / 'output')
+    os.mkdir(output_dir)
     with open(os.path.join(output_dir, 'scaled.0000_00d'), 'w') as f:
         f.write("ID,Foo\n0,10\n1,20\n")  # file range 10..20
     with open(os.path.join(output_dir, 'scaled.0010_00d'), 'w') as f:
@@ -414,7 +414,7 @@ def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory):
     assert tmv._variable_value_ranges() == {'Foo': (10.0, 40.0)}  # ID is not a variable
     assert tmv._variable_value_ranges(['Missing']) == {}
 
-    base = os.path.join(tempfile.mkdtemp(), mesh_basename)
+    base = os.path.join(tmp_path, mesh_basename)
     meta = tmv.to_gltf(base, '32613', output_variables=['Foo'], generate_legend=True)
 
     # One legend for the whole series, shared by every time step, and the shared range on every entry
@@ -433,10 +433,11 @@ def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory):
         assert (cell_uv[2:] == 1.0).all()  # Cells without a value stay transparent
 
 
-def test_variable_labels_title_and_scale_the_legends(tmv_factory, mocker):
+def test_variable_labels_title_and_scale_the_legends(tmv_factory, mocker, tmp_path):
     """``variable_labels`` titles each variable's legend and draws its ticks in display units (file values x factor);
     the glTF files and the reported min/max stay in file units."""
-    output_dir = tempfile.mkdtemp()
+    output_dir = str(tmp_path / 'output')
+    os.mkdir(output_dir)
     with open(os.path.join(output_dir, 'scaled.0000_00d'), 'w') as f:
         f.write("ID,Foo\n0,10\n1,20\n")
     with open(os.path.join(output_dir, 'scaled.0010_00d'), 'w') as f:
@@ -446,7 +447,7 @@ def test_variable_labels_title_and_scale_the_legends(tmv_factory, mocker):
     tmv.output_files = [os.path.join(output_dir, 'scaled.0000_00d'), os.path.join(output_dir, 'scaled.0010_00d')]
     generate_legend = mocker.patch.object(tmv, '_generate_legend')
 
-    base = os.path.join(tempfile.mkdtemp(), mesh_basename)
+    base = os.path.join(tmp_path, mesh_basename)
     meta = tmv.to_gltf(
         base, '32613', output_variables=['Foo'], generate_legend=True,
         variable_labels={'Foo': dict(title='Foo moisture (% saturation)', factor=100)},
@@ -525,14 +526,13 @@ def test_tin_surface_elevations_outside_tin(tmv_factory):
     assert z2[0] == z2[1] == z
 
 
-def test_glb_output(tmv_factory, files_dir):
+def test_glb_output(tmv_factory, files_dir, tmp_path):
     """Binary glTF is the default: one .glb per variable with the color ramp stored in the binary buffer."""
     import pygltflib
 
     mesh_basename = 'salas_outputs'
     tmv = tmv_factory(mesh_basename, '32613', output_files=['salas.0700_00d'])
-    temp_dir = tempfile.mkdtemp()
-    base = os.path.join(temp_dir, mesh_basename)
+    base = os.path.join(tmp_path, mesh_basename)
     tmv.to_gltf(base, '32613', output_variables=['S'], generate_legend=True)
     tmv.to_gltf(base, '32613', output_variables=['S'], binary=False)
     glb_file = f'{base}_salas-0700_00d_S.glb'
@@ -558,12 +558,11 @@ def test_glb_output(tmv_factory, files_dir):
         np.testing.assert_array_equal(a, b)
 
 
-def test_bare_mesh_renders_voronoi_cells_by_elevation(tmv_factory):
+def test_bare_mesh_renders_voronoi_cells_by_elevation(tmv_factory, tmp_path):
     """A TIN dataset without simulation output is rendered as Voronoi cells colored by node elevation."""
     mesh_basename = 'salas_outputs'
     tmv = tmv_factory(mesh_basename, '32613')
-    temp_dir = tempfile.mkdtemp()
-    base = os.path.join(temp_dir, mesh_basename)
+    base = os.path.join(tmp_path, mesh_basename)
     meta = tmv.to_gltf(base, '32613', generate_legend=True)
     glb_file = f'{base}.glb'
     assert os.path.exists(glb_file) and os.path.exists(f'{base}_legend.png')
@@ -674,11 +673,10 @@ def test_parse_output_file_name(name, expected):
         assert isinstance(result['total_hours'], int if expected['minutes'] == 0 else float)
 
 
-def test_bare_mesh_files_meta(tmv_factory):
+def test_bare_mesh_files_meta(tmv_factory, tmp_path):
     """The bare mesh (no output files) reports a single static Elevation entry."""
     tmv = tmv_factory('salas', '32613')
-    temp_dir = tempfile.mkdtemp()
-    gltf_file_base_name = os.path.join(temp_dir, 'salas')
+    gltf_file_base_name = os.path.join(tmp_path, 'salas')
     meta = tmv.to_gltf(gltf_file_base_name, generate_legend=True)
     z = tmv.nodes[tmv.voronoi['ids'], 2].astype(float)
     assert meta['files'] == [dict(

@@ -90,15 +90,18 @@ def test_projection_string_function(tsm, minimal_project):
     assert string2 == '+proj=longlat +datum=WGS84 +no_defs '
 
 
+def _gltf_file_counts(dataset_path):
+    """(number of .glb files, number of legend PNGs) in the dataset's ``gltf`` directory."""
+    gltf_files = os.listdir(os.path.join(dataset_path, 'gltf'))
+    return len([f for f in gltf_files if f.endswith('.glb')]), len([f for f in gltf_files if f.endswith('_legend.png')])
+
+
 def test_create_time_integrated_raster_layer(tsm, time_integrated_dataset, node_file_dataset):
     """Without a variable table every column of the _i files is rendered, one time series per variable."""
     meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_integrated_dataset)
 
     dataset_path = time_integrated_dataset.file_collection_client.path
-    assert os.path.exists(os.path.join(dataset_path, 'gltf'))
-    gltf_files = os.listdir(os.path.join(dataset_path, 'gltf'))
-    assert len([f for f in gltf_files if f.endswith('.glb')]) == 110
-    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 55  # one legend per variable
+    assert _gltf_file_counts(dataset_path) == (110, 55)  # 55 variables x 2 time steps, one legend per variable
     assert len(meta['files']) == 110
 
     # The viz attribute groups the glTF files into per-variable time series and survives JSON serialization
@@ -136,10 +139,8 @@ def test_create_time_integrated_layer_offers_only_sheet_variables(tsm, time_inte
     """With the integrated variable table only priority and secondary variables are rendered, labelled and scaled."""
     meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_integrated_dataset, variable_kind='integrated')
     dataset_path = time_integrated_dataset.file_collection_client.path
-    gltf_files = os.listdir(os.path.join(dataset_path, 'gltf'))
     # examplebasin _i header: 6 priority (Z, AvSM, AvRtM, peakWE, cSnSub, cSnEvap) + 9 secondary, 2 time steps
-    assert len([f for f in gltf_files if f.endswith('.glb')]) == 30
-    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 15
+    assert _gltf_file_counts(dataset_path) == (30, 15)
     written = [f['variable'] for f in meta['files']]
     assert 'BndCd' not in written and 'Ks' not in written and 'VAr' not in written
 
@@ -169,17 +170,11 @@ def test_create_tribs_tin_layer(tsm, tin_dataset, tin_dataset_empty, tin_output_
     assert len(os.listdir(os.path.join(tin_dataset_path, 'gltf'))) == 2
 
     tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'Z'])
-    assert os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))
-    gltf_files = os.listdir(os.path.join(tin_output_dataset_path, 'gltf'))
-    assert len([f for f in gltf_files if f.endswith('.glb')]) == 10
-    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 2  # one legend per variable (S, Z)
+    assert _gltf_file_counts(tin_output_dataset_path) == (10, 2)  # 2 variables x 5 time steps, one legend each
 
-    # Check again to make sure it doesn't add MORE files
+    # Creating the layer again replaces the files instead of adding to them
     tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'Z'])
-    assert os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))
-    gltf_files = os.listdir(os.path.join(tin_output_dataset_path, 'gltf'))
-    assert len([f for f in gltf_files if f.endswith('.glb')]) == 10
-    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 2  # one legend per variable (S, Z)
+    assert _gltf_file_counts(tin_output_dataset_path) == (10, 2)
 
     tsm.delete_tribs_tin_layer(tin_output_dataset)
     assert not os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))

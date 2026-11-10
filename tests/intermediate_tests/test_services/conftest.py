@@ -257,7 +257,7 @@ def tin_dataset_empty(project_with_fdb, files_dir):
 @pytest.fixture(scope="function")
 def tin_output_dataset(project_with_fdb, files_dir):
     """
-    Create a dataset with a file database.
+    Time-integrated (_00i) output of the ``tin_dataset`` mesh, as a dataset with a file database.
     """
     project = project_with_fdb
     session = object_session(project)
@@ -266,7 +266,7 @@ def tin_output_dataset(project_with_fdb, files_dir):
         dataset = Dataset.new(
             session=session,
             name="Dataset",
-            description="Dataset Tin Output TD",
+            description="Time-integrated output of the Tin dataset",
             created_by="_staff",
             project=project,
             dataset_type=DatasetTypes.TRIBS_OUT_TIME_INTEGRATED,

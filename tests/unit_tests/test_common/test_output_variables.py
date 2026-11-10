@@ -18,92 +18,132 @@ EXAMPLEBASIN_MRF = (
 
 def test_tables_cover_the_sheet():
     assert {kind: len(rows) for kind, rows in ov.OUTPUT_VARIABLES.items()} == {'qout': 3, 'mrf': 32, 'integrated': 75}
-    for kind, rows in ov.OUTPUT_VARIABLES.items():
-        keys = [alias for row in rows for alias in (row.name, *row.aliases)]
-        assert len(keys) == len(set(keys)), f'duplicate name or alias in {kind}'
-        for row in rows:
-            if row.tier in (ov.Tier.PRIORITY, ov.Tier.SECONDARY):
-                assert row.label and row.description, row
-            assert isinstance(row.factor, float), row
 
 
-def test_kind_for_dataset_type():
-    assert ov.kind_for_dataset_type(DatasetTypes.TRIBS_OUT_QOUT) == ov.QOUT
-    assert ov.kind_for_dataset_type(DatasetTypes.TRIBS_OUT_MRF) == ov.MRF
-    assert ov.kind_for_dataset_type(DatasetTypes.TRIBS_OUT_TIME_INTEGRATED) == ov.INTEGRATED
-    for other in (DatasetTypes.TRIBS_OUT_STATIONS, DatasetTypes.TRIBS_OUT_PIXEL, DatasetTypes.TRIBS_OUT_RFT,
-                  DatasetTypes.TRIBS_TIN, DatasetTypes.TRIBS_SDF_RAIN_GAUGE):
-        assert ov.kind_for_dataset_type(other) is None
+@pytest.mark.parametrize('kind', list(ov.OUTPUT_VARIABLES))
+def test_table_rows_are_well_formed(kind):
+    rows = ov.OUTPUT_VARIABLES[kind]
+    keys = [alias for row in rows for alias in (row.name, *row.aliases)]
+    assert len(keys) == len(set(keys)), f'duplicate name or alias in {kind}'
+    offered = [row for row in rows if row.tier in (ov.Tier.PRIORITY, ov.Tier.SECONDARY)]
+    assert [row.name for row in offered if not (row.label and row.description)] == []  # offered rows are documented
+    assert [row.name for row in rows if not isinstance(row.factor, float)] == []
 
 
-def test_lookup_by_name_and_alias():
+@pytest.mark.parametrize('dataset_type, kind', [
+    (DatasetTypes.TRIBS_OUT_QOUT, ov.QOUT),
+    (DatasetTypes.TRIBS_OUT_MRF, ov.MRF),
+    (DatasetTypes.TRIBS_OUT_TIME_INTEGRATED, ov.INTEGRATED),
+    (DatasetTypes.TRIBS_OUT_STATIONS, None),
+    (DatasetTypes.TRIBS_OUT_PIXEL, None),
+    (DatasetTypes.TRIBS_OUT_RFT, None),
+    (DatasetTypes.TRIBS_TIN, None),
+    (DatasetTypes.TRIBS_SDF_RAIN_GAUGE, None),
+])
+def test_kind_for_dataset_type(dataset_type, kind):
+    assert ov.kind_for_dataset_type(dataset_type) == kind
+
+
+@pytest.mark.parametrize('kind, name, expected_name', [
+    ('mrf', 'MDGW', 'MDGW'),
+    ('mrf', 'MGW', 'MDGW'),  # older tRIBS builds
+    ('mrf', 'Max', 'RainMax'),
+    ('mrf', '%Sat', 'SatPercent'),
+    ('integrated', 'Aspct', 'Aspect'),
+    ('qout', 'Z', None),  # exact per kind, never fuzzy
+    ('mrf', 'mdgw', None),
+    (None, 'Z', None),
+    ('mrf', None, None),
+])
+def test_lookup_by_name_and_alias(kind, name, expected_name):
+    row = ov.lookup(kind, name)
+    assert (row.name if row is not None else None) == expected_name
+
+
+def test_lookup_returns_the_table_row():
     assert ov.lookup('mrf', 'MDGW').label == 'Depth to Groundwater'
-    assert ov.lookup('mrf', 'MGW') is ov.lookup('mrf', 'MDGW')  # older tRIBS builds
-    assert ov.lookup('mrf', 'Max').name == 'RainMax'
-    assert ov.lookup('mrf', '%Sat').name == 'SatPercent'
-    assert ov.lookup('integrated', 'Aspct').name == 'Aspect'
+    assert ov.lookup('mrf', 'MGW') is ov.lookup('mrf', 'MDGW')
     assert ov.lookup('integrated', 'Z').tier is ov.Tier.PRIORITY
-    assert ov.lookup('qout', 'Z') is None  # exact per kind, never fuzzy
-    assert ov.lookup('mrf', 'mdgw') is None
-    assert ov.lookup(None, 'Z') is None
-    assert ov.lookup('mrf', None) is None
 
 
-def test_split_unit_suffix():
-    assert ov.split_unit_suffix('Qstrm_m3-s') == ('Qstrm', 'm3-s')
-    assert ov.split_unit_suffix('Nwt_mm') == ('Nwt', 'mm')
-    assert ov.split_unit_suffix('Srf_Hour_mm') == ('Srf_Hour', 'mm')
-    assert ov.split_unit_suffix('Srf_[]') == ('Srf', '[]')
-    assert ov.split_unit_suffix('MAP') == ('MAP', None)
-    assert ov.split_unit_suffix('Bedrock_Depth_mm') == ('Bedrock_Depth', 'mm')
+@pytest.mark.parametrize('layer_name, expected', [
+    ('Qstrm_m3-s', ('Qstrm', 'm3-s')),
+    ('Nwt_mm', ('Nwt', 'mm')),
+    ('Srf_Hour_mm', ('Srf_Hour', 'mm')),
+    ('Srf_[]', ('Srf', '[]')),
+    ('MAP', ('MAP', None)),
+    ('Bedrock_Depth_mm', ('Bedrock_Depth', 'mm')),
+])
+def test_split_unit_suffix(layer_name, expected):
+    assert ov.split_unit_suffix(layer_name) == expected
 
 
-def test_describe_known_variables():
+def test_describe_returns_every_field():
     assert ov.describe('mrf', 'MSMRt') == dict(
         label='Root-Zone Soil Moisture', units='% saturation', tier='priority',
         description='Basin-average relative saturation (θ/θs) of the top 1m of soil.', factor=100.0,
     )
-    assert ov.describe('mrf', 'MGW')['factor'] == 0.001 and ov.describe('mrf', 'MGW')['units'] == 'm'
-    assert ov.describe('mrf', 'AvSnSub')['factor'] == -10.0
-    assert ov.describe('integrated', 'peakWE')['units'] == 'mm'
-    assert ov.describe('integrated', 'EvpFrct')['units'] is None  # dimensionless
-    assert ov.describe('mrf', 'Srf')['tier'] == 'secondary'
-    # Hidden/ignored/index rows are described (for completeness) but offered no tier
-    assert ov.describe('mrf', 'RainMax')['tier'] is None
-    assert ov.describe('qout', 'Time')['tier'] is None
-
-
-def test_describe_unknown_variables():
     assert ov.describe(None, 'Nwt', unit_token='mm') == dict(
         label='Nwt', units='mm', tier=None, description='', factor=1.0
     )
-    assert ov.describe(None, 'Qstrm', unit_token='m3-s')['units'] == 'm³/s'
-    assert ov.describe(None, 'Srf', unit_token='[]')['units'] is None
-    assert ov.describe(None, 'Odd', unit_token='furlongs')['units'] == 'furlongs'
-    assert ov.describe('mrf', 'Hsrf', file_units='m3/s')['units'] == 'm3/s'
-    assert ov.describe('mrf', 'Hsrf', file_units='[]')['units'] is None
-    assert ov.describe('mrf', 'Hsrf')['units'] is None
 
 
-def test_visible_variables_orders_priority_then_secondary_then_unknown():
-    assert ov.visible_variables('mrf', EXAMPLEBASIN_MRF) == [
+@pytest.mark.parametrize('kind, name, field, expected', [
+    ('mrf', 'MGW', 'factor', 0.001),
+    ('mrf', 'MGW', 'units', 'm'),
+    ('mrf', 'AvSnSub', 'factor', -10.0),
+    ('integrated', 'peakWE', 'units', 'mm'),
+    ('integrated', 'EvpFrct', 'units', None),  # dimensionless
+    ('mrf', 'Srf', 'tier', 'secondary'),
+    # Hidden/ignored/index rows are described (for completeness) but offered no tier
+    ('mrf', 'RainMax', 'tier', None),
+    ('qout', 'Time', 'tier', None),
+])
+def test_describe_known_variables(kind, name, field, expected):
+    assert ov.describe(kind, name)[field] == expected
+
+
+@pytest.mark.parametrize('kind, name, kwargs, units', [
+    (None, 'Qstrm', dict(unit_token='m3-s'), 'm³/s'),
+    (None, 'Srf', dict(unit_token='[]'), None),
+    (None, 'Odd', dict(unit_token='furlongs'), 'furlongs'),
+    ('mrf', 'Hsrf', dict(file_units='m3/s'), 'm3/s'),
+    ('mrf', 'Hsrf', dict(file_units='[]'), None),
+    ('mrf', 'Hsrf', {}, None),
+])
+def test_describe_unknown_variables_take_the_units_from_the_file(kind, name, kwargs, units):
+    assert ov.describe(kind, name, **kwargs)['units'] == units
+
+
+OLD_MRF = 'Time Srf MAP Max Min FState MSM100 MSMRt MSMU MGW MET %Sat %Rain'.split()
+
+
+@pytest.mark.parametrize('kind, names, expected', [
+    ('mrf', EXAMPLEBASIN_MRF, [
         'MAP', 'MSMRt', 'MDGW', 'MET', 'AvSWE', 'AvSnSub', 'AvSnEvap', 'AvInSu',  # priority, file order
         'Srf', 'MSM100', 'MSMU', 'AvMelt', 'SCA',  # secondary, file order
-    ]
-    old_mrf = 'Time Srf MAP Max Min FState MSM100 MSMRt MSMU MGW MET %Sat %Rain'.split()
-    assert ov.visible_variables('mrf', old_mrf) == ['MAP', 'MSMRt', 'MGW', 'MET', 'Srf', 'MSM100', 'MSMU']
-    assert ov.visible_variables('qout', ['Qstrm', 'Hlev']) == ['Qstrm']
-    assert ov.visible_variables('integrated', ['ID', 'BndCd', 'Z', 'Mystery', 'CAr']) == ['Z', 'CAr', 'Mystery']
-    names = ['ID', 'Z', 'S', 'Nwt', 'Mu']
-    assert ov.visible_variables(None, names) == names  # no table: everything, untouched
+    ]),
+    ('mrf', OLD_MRF, ['MAP', 'MSMRt', 'MGW', 'MET', 'Srf', 'MSM100', 'MSMU']),
+    ('qout', ['Qstrm', 'Hlev'], ['Qstrm']),
+    ('integrated', ['ID', 'BndCd', 'Z', 'Mystery', 'CAr'], ['Z', 'CAr', 'Mystery']),
+    (None, ['ID', 'Z', 'S', 'Nwt', 'Mu'], ['ID', 'Z', 'S', 'Nwt', 'Mu']),  # no table: everything, untouched
+])
+def test_visible_variables_orders_priority_then_secondary_then_unknown(kind, names, expected):
+    assert ov.visible_variables(kind, names) == expected
+
+
+def test_visible_variables_accepts_any_iterable():
     assert ov.visible_variables('mrf', iter(['MAP'])) == ['MAP']
 
 
-def test_scale_range():
-    assert ov.scale_range(0.1, 0.9, 100) == (10.0, 90.0)
-    assert ov.scale_range(0, 2, -10) == (-20, 0)
-    assert ov.scale_range(None, 3, 2) == (None, 3)
-    assert ov.scale_range(1868.0, 2167.0, 1.0) == (1868.0, 2167.0)
+@pytest.mark.parametrize('low, high, factor, expected', [
+    (0.1, 0.9, 100, (10.0, 90.0)),
+    (0, 2, -10, (-20, 0)),
+    (None, 3, 2, (None, 3)),
+    (1868.0, 2167.0, 1.0, (1868.0, 2167.0)),
+])
+def test_scale_range(low, high, factor, expected):
+    assert ov.scale_range(low, high, factor) == expected
 
 
 @pytest.mark.parametrize('kind, relative_path', [
