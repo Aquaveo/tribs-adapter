@@ -77,6 +77,11 @@ class tRIBSMeshViz:
     GLB_EXTENSION = '.glb'
     GLTF_EXTENSION = '.gltf'
 
+    # Color ramp (256x256 PNG) the cells are colored with when the caller does not give one
+    DEFAULT_COLOR_RAMP_FILE = os.path.join(
+        os.path.dirname(__file__), '..', 'templates', 'color_ramps', 'TopoAtlasShader.png'
+    )
+
     def __init__(
         self,
         mesh_basename: Path | str,
@@ -109,6 +114,7 @@ class tRIBSMeshViz:
         self.nodes = self._reassign_bad_z_values(self.nodes) if (self.nodes[:, 2] < -1e8).any() else self.nodes
         self.output_files = output_files
         self._data = None  # Lazily loaded by the ``data`` property
+        self._cell_values_cache = {}  # (output file, variable) -> cell values, see ``_cell_values``
         self.clip_cells_to_mesh = clip_cells_to_mesh
         self.voi_file = self._resolve_voi_file(voi_file)
         self._voronoi = None  # Lazily loaded by the ``voronoi`` property
@@ -434,6 +440,11 @@ class tRIBSMeshViz:
         nodes = self.nodes.astype(np.float64)
         cell_ids = self.voronoi['ids']
         polygons = self.voronoi['polygons']
+        if len(polygons) == 0:
+            raise ValueError(
+                f"The mesh {self.mesh_basename} has no Voronoi cells to render: none of its nodes is an active "
+                f"(interior or stream) node with a well-defined cell."
+            )
 
         # Elevation of every ring vertex from the TIN surface (computed once for all cells so shared vertices match)
         ring_points = np.concatenate(polygons, axis=0)
@@ -603,7 +614,19 @@ class tRIBSMeshViz:
         Returns:
             List with one value (or None when the cell has no value) per cell in ``self.voronoi['ids']``, or None if
             the variable is not present in the output file.
+
+        The result is cached per (output file, variable): the value range pass and the glTF pass of ``to_gltf``
+        both need it, and the join (with its warnings about unknown IDs) should happen once.
         """
+        cache_key = (str(output_file), output_variable)
+        if cache_key in self._cell_values_cache:
+            return self._cell_values_cache[cache_key]
+        cell_values = self._join_cell_values(output_file, output_variable)
+        self._cell_values_cache[cache_key] = cell_values
+        return cell_values
+
+    def _join_cell_values(self, output_file: Path | str, output_variable: str) -> list | None:
+        """The uncached join behind ``_cell_values``."""
         file_data = self.data[output_file]
         if output_variable not in file_data:
             log.warning(f"Output variable {output_variable} not found in {output_file}.")
@@ -704,10 +727,7 @@ class tRIBSMeshViz:
         cell_normals = self._compute_vertex_normals(localized_cells, geometry['triangles'])
 
         if color_ramp_file is None:
-            file_name = 'TopoAtlasShader'
-            color_ramp_file = os.path.join(
-                os.path.dirname(__file__), '..', 'templates', 'color_ramps', f'{file_name}.png'
-            )
+            color_ramp_file = self.DEFAULT_COLOR_RAMP_FILE
 
         log.debug("Saving glTF file...")
         if len(self.output_files) == 0:
@@ -1100,7 +1120,7 @@ class tRIBSMeshViz:
         triangles: np.ndarray,
         normals: np.ndarray,
         variable_data: np.ndarray,
-        color_ramp_file: Path | str = None,  # Must be 256x256
+        color_ramp_file: Path | str,  # Must be 256x256
         binary: bool = True,
     ) -> pygltflib.GLTF2:
         """Assemble a glTF from vertex positions, triangle indices, vertex normals and vertex texture coordinates.
@@ -1193,11 +1213,6 @@ class tRIBSMeshViz:
         ))
 
         # Get Image
-        if color_ramp_file is None:
-            file_name = 'TopoAtlasShader'
-            color_ramp_file = os.path.join(
-                os.path.dirname(__file__), '..', 'templates', 'color_ramps', f'{file_name}.png'
-            )
         with open(color_ramp_file, 'rb') as f:
             image_data = f.read()
         if binary:

@@ -1,4 +1,4 @@
-from .dataset_types import DatasetTypes
+from .dataset_types import DatasetTypes, GltfOutputDatasetTypes
 
 FILE_TO_DATASET = {
     # Routing Variables
@@ -363,3 +363,10 @@ FILE_TO_DATASET = {
         "is_output": False,
     },
 }
+
+# Output file extensions whose datasets hold per-Voronoi-cell variables rendered as glTF, and therefore get the
+# <OUTFILENAME>_voi file too (see ``Realization``). Derived from the OUTFILENAME entry above so it moves with it.
+VORONOI_OUTPUT_EXTENSIONS = tuple(
+    ext for ext, dataset_type in FILE_TO_DATASET['OUTFILENAME']['dataset_type'].items()
+    if dataset_type in GltfOutputDatasetTypes
+)

@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session, object_session
 from tethysext.atcore.models.app_users import Resource
 
-from tribs_adapter.common.file_to_dataset import FILE_TO_DATASET
+from tribs_adapter.common.file_to_dataset import FILE_TO_DATASET, VORONOI_OUTPUT_EXTENSIONS
 from tribs_adapter.io.input_file import FileDatabasePath
 from tribs_adapter.services.tribs_spatial_manager import TribsSpatialManager
 from .mixins import InputFileAttrMixin, LinkMixin, SridAttrMixin
@@ -21,10 +21,6 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
     DISPLAY_TYPE_PLURAL = 'Realizations'
 
     UPLOAD_STATUS_KEY = 'upload'
-
-    # Output file extensions whose datasets hold per-Voronoi-cell variables (and therefore get the _voi file too).
-    # Only the time-integrated output: the time-dynamic _d files are not turned into a dataset (see FILE_TO_DATASET).
-    VORONOI_OUTPUT_EXTENSIONS = ('_00i',)
 
     __mapper_args__ = {
         'polymorphic_identity': TYPE,
@@ -195,7 +191,7 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
             # Keep it with the spatial output datasets: it is used to render the variables on the Voronoi cells.
             voi_path = Path(model_root) / f'{tribs_input.get_value(card).path}_voi'
             if voi_path.is_file():
-                for ext in self.VORONOI_OUTPUT_EXTENSIONS:
+                for ext in VORONOI_OUTPUT_EXTENSIONS:
                     if existing_file_paths.get(ext) and voi_path not in existing_file_paths[ext]:
                         existing_file_paths[ext].append(voi_path)
 

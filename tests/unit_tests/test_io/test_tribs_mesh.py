@@ -687,3 +687,30 @@ def test_bare_mesh_files_meta(tmv_factory):
     )]
     assert os.path.exists(meta['files'][0]['gltf'])
     assert os.path.exists(meta['files'][0]['legend'])
+
+
+def test_voronoi_geometry_without_cells_is_an_explicit_error(tmv_factory):
+    tmv = tmv_factory('salas_outputs', '32613')
+    tmv._voronoi = {'ids': np.array([], dtype=np.int64), 'polygons': []}  # e.g. no active node has a cell
+    with pytest.raises(ValueError, match='has no Voronoi cells'):
+        tmv._build_voronoi_geometry()
+
+
+def test_cell_values_are_joined_once_per_file_and_variable(tmv_factory, tmp_path, caplog):
+    """The range pass and the glTF pass share one join, so the warning about unknown node IDs is logged once."""
+    output_file = str(tmp_path / 'cached.0000_00d')
+    with open(output_file, 'w') as f:
+        f.write("ID,Foo\n0,10\n1,20\n999999,30\n")  # one row outside of the mesh
+    tmv = tmv_factory('salas_outputs', '32613')
+    tmv.output_files = [output_file]
+
+    with caplog.at_level('WARNING', logger='tribs_adapter.io.tribs_mesh'):
+        first = tmv._cell_values(output_file, 'Foo')
+        second = tmv._cell_values(output_file, 'Foo')
+        assert tmv._cell_values(output_file, 'Missing') is None
+        assert tmv._cell_values(output_file, 'Missing') is None
+        tmv.to_gltf(str(tmp_path / 'out'), '32613', output_variables=['Foo'])
+
+    assert second is first
+    assert sum('outside of the mesh' in r.message for r in caplog.records) == 1
+    assert sum('Missing not found' in r.message for r in caplog.records) == 1
