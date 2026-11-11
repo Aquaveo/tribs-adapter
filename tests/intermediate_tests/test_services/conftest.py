@@ -257,7 +257,7 @@ def tin_dataset_empty(project_with_fdb, files_dir):
 @pytest.fixture(scope="function")
 def tin_output_dataset(project_with_fdb, files_dir):
     """
-    Create a dataset with a file database.
+    Time-integrated (_00i) output of the ``tin_dataset`` mesh, as a dataset with a file database.
     """
     project = project_with_fdb
     session = object_session(project)
@@ -266,36 +266,14 @@ def tin_output_dataset(project_with_fdb, files_dir):
         dataset = Dataset.new(
             session=session,
             name="Dataset",
-            description="Dataset Tin Output TD",
+            description="Time-integrated output of the Tin dataset",
             created_by="_staff",
             project=project,
-            dataset_type=DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
+            dataset_type=DatasetTypes.TRIBS_OUT_TIME_INTEGRATED,
             srid=26913,
             items=[os.path.join(model_root / "tin" / "output", x) for x in os.listdir(model_root / "tin" / "output")],
             relative_to=model_root / "tin" / "output",
         )
-    yield dataset
-    session.delete(dataset)
-    session.commit()
-
-
-@pytest.fixture(scope="function")
-def time_dynamic_dataset(project_with_fdb, files_dir, scenario_with_input_file):
-    project = project_with_fdb
-    session = object_session(project)
-    model_root = files_dir / "spatial_manager" / "layers"
-    dataset = Dataset.new(
-        name="Test Dataset",
-        description="Test Dataset Description",
-        created_by="_staff",
-        project=project_with_fdb,
-        session=session,
-        dataset_type=DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
-        srid=26913,
-        items=[os.path.join(model_root / "time_dynamic", x) for x in os.listdir(model_root / "time_dynamic")],
-        relative_to=model_root / "time_dynamic",
-    )
-    scenario_with_input_file.link_dataset(dataset, card="Test Card")  # Link the dataset to the scenario
     yield dataset
     session.delete(dataset)
     session.commit()
@@ -312,7 +290,7 @@ def time_integrated_dataset(project_with_fdb, files_dir, scenario_with_input_fil
         created_by="_staff",
         project=project_with_fdb,
         session=session,
-        dataset_type=DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
+        dataset_type=DatasetTypes.TRIBS_OUT_TIME_INTEGRATED,
         srid=26913,
         items=[os.path.join(model_root / "time_integrated", x) for x in os.listdir(model_root / "time_integrated")],
         relative_to=model_root / "time_integrated",

@@ -1,3 +1,5 @@
+import datetime
+import json
 import os
 from pathlib import Path
 import requests
@@ -88,26 +90,70 @@ def test_projection_string_function(tsm, minimal_project):
     assert string2 == '+proj=longlat +datum=WGS84 +no_defs '
 
 
-def test_create_time_dynamic_raster_layer(tsm, time_dynamic_dataset, node_file_dataset):
-    tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_dynamic_dataset)
-
-    dataset_path = time_dynamic_dataset.file_collection_client.path
-    assert os.path.exists(os.path.join(dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 228
-
-    tsm.delete_tribs_tin_layer(time_dynamic_dataset)
-    assert not os.path.exists(os.path.join(dataset_path, 'gltf'))
+def _gltf_file_counts(dataset_path):
+    """(number of .glb files, number of legend PNGs) in the dataset's ``gltf`` directory."""
+    gltf_files = os.listdir(os.path.join(dataset_path, 'gltf'))
+    return len([f for f in gltf_files if f.endswith('.glb')]), len([f for f in gltf_files if f.endswith('_legend.png')])
 
 
 def test_create_time_integrated_raster_layer(tsm, time_integrated_dataset, node_file_dataset):
-    tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_integrated_dataset)
+    """Without a variable table every column of the _i files is rendered, one time series per variable."""
+    meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_integrated_dataset)
 
     dataset_path = time_integrated_dataset.file_collection_client.path
-    assert os.path.exists(os.path.join(dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(dataset_path, 'gltf'))) == 228
+    assert _gltf_file_counts(dataset_path) == (110, 55)  # 55 variables x 2 time steps, one legend per variable
+    assert len(meta['files']) == 110
+
+    # The viz attribute groups the glTF files into per-variable time series and survives JSON serialization
+    viz = tsm._build_gltf_viz(
+        time_integrated_dataset, meta, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=10
+    )
+    assert viz['type'] == 'gltf'
+    assert len(viz['url']) == 110 and len(viz['legend']) == 55
+    assert viz['url'] == sorted(viz['url'])
+    url_dir = os.path.join(
+        str(time_integrated_dataset.file_collection.file_database_id), str(time_integrated_dataset.file_collection.id),
+        'gltf'
+    )
+    assert all(u.startswith(url_dir) for u in viz['url'])
+    variables = {v['name']: v for v in viz['variables']}
+    assert 'ID' not in variables and 'BndCd' not in variables
+    assert 'AvLeafAI' in variables
+    z = variables['Z']
+    assert [t['hours'] for t in z['timesteps']] == [0, 10]
+    assert z['step_hours'] == 10
+    # The value range the colors are scaled to over all time steps, for client-drawn legends
+    assert isinstance(z['min'], float) and isinstance(z['max'], float) and z['min'] < z['max']
+    assert z['start'] == '2004-06-01T00:00:00Z' and z['end'] == '2004-06-01T10:00:00Z'
+    assert z['timesteps'][0]['url'] in viz['url'] and z['timesteps'][0]['legend'] in viz['legend']
+
+    time_integrated_dataset.set_attribute('viz', viz)
+    serialized = time_integrated_dataset.serialize()
+    assert serialized['viz']['variables'] == viz['variables']
 
     tsm.delete_tribs_tin_layer(time_integrated_dataset)
     assert not os.path.exists(os.path.join(dataset_path, 'gltf'))
+
+
+def test_create_time_integrated_layer_offers_only_sheet_variables(tsm, time_integrated_dataset, node_file_dataset):
+    """With the integrated variable table only priority and secondary variables are rendered, labelled and scaled."""
+    meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_integrated_dataset, variable_kind='integrated')
+    dataset_path = time_integrated_dataset.file_collection_client.path
+    # examplebasin _i header: 6 priority (Z, AvSM, AvRtM, peakWE, cSnSub, cSnEvap) + 9 secondary, 2 time steps
+    assert _gltf_file_counts(dataset_path) == (30, 15)
+    written = [f['variable'] for f in meta['files']]
+    assert 'BndCd' not in written and 'Ks' not in written and 'VAr' not in written
+
+    viz = tsm._build_gltf_viz(time_integrated_dataset, meta, variable_kind='integrated')
+    names = [v['name'] for v in viz['variables']]
+    assert names[:6] == ['Z', 'AvSM', 'AvRtM', 'peakWE', 'cSnSub', 'cSnEvap']  # priority first, file order
+    assert [v['tier'] for v in viz['variables']] == ['priority'] * 6 + ['secondary'] * 9
+    av_sm = next(v for v in viz['variables'] if v['name'] == 'AvSM')
+    assert (av_sm['label'], av_sm['units']) == ('Mean Surface Soil Moisture (Top 10 cm)', '% saturation')
+    assert av_sm['factor'] == 100.0 and 0 <= av_sm['min'] <= av_sm['max'] <= 100
+    assert av_sm['description']
+    json.dumps(viz)
+    tsm.delete_tribs_tin_layer(time_integrated_dataset)
 
 
 def test_create_tribs_tin_layer(tsm, tin_dataset, tin_dataset_empty, tin_output_dataset):
@@ -124,13 +170,11 @@ def test_create_tribs_tin_layer(tsm, tin_dataset, tin_dataset_empty, tin_output_
     assert len(os.listdir(os.path.join(tin_dataset_path, 'gltf'))) == 2
 
     tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'Z'])
-    assert os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(tin_output_dataset_path, 'gltf'))) == 20
+    assert _gltf_file_counts(tin_output_dataset_path) == (10, 2)  # 2 variables x 5 time steps, one legend each
 
-    # Check again to make sure it doesn't add MORE files
+    # Creating the layer again replaces the files instead of adding to them
     tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'Z'])
-    assert os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))
-    assert len(os.listdir(os.path.join(tin_output_dataset_path, 'gltf'))) == 20
+    assert _gltf_file_counts(tin_output_dataset_path) == (10, 2)
 
     tsm.delete_tribs_tin_layer(tin_output_dataset)
     assert not os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))

@@ -354,22 +354,6 @@ serialized_project = {
             'attributes': {},
             'created_by': '_staff',
             'date_created': '0000-00-00T00:00:00+00:00',
-            'description': 'Time-Dynamic Variable Output for Salas Run 10-20-30.',
-            'display_type_plural': 'Datasets',
-            'display_type_singular': 'Dataset',
-            'locked': False,
-            'name': 'Time-Dynamic Variable Output',
-            'organizations': [],
-            'public': False,
-            'slug': 'datasets',
-            'status': None,
-            'type': 'dataset_resource',
-            'dataset_type': 'tribs_out_time_dynamic'
-        }, {
-            'id': '00000000-0000-0000-0000-000000000000',
-            'attributes': {},
-            'created_by': '_staff',
-            'date_created': '0000-00-00T00:00:00+00:00',
             'description': 'Time-Integrated Variable Output for Salas Run 10-20-30.',
             'display_type_plural': 'Datasets',
             'display_type_singular': 'Dataset',
@@ -1011,13 +995,6 @@ serialized_project = {
                                         unordered([{
                                             'resource_id': '00000000-0000-0000-0000-000000000000',
                                             'file_collection_id': '00000000-0000-0000-0000-000000000000',
-                                            'file_collection_paths': [
-                                                'salas.0000_00d', 'salas.0010_00d', 'salas.0700_00d'
-                                            ],
-                                            'path': ''
-                                        }, {
-                                            'resource_id': '00000000-0000-0000-0000-000000000000',
-                                            'file_collection_id': '00000000-0000-0000-0000-000000000000',
                                             'file_collection_paths': ['salas.0000_00i', 'salas.0700_00i'],
                                             'path': ''
                                         }, {
@@ -1176,9 +1153,6 @@ serialized_project = {
                         }, {
                             'id': '00000000-0000-0000-0000-000000000000',
                             'name': 'Qout File'
-                        }, {
-                            'id': '00000000-0000-0000-0000-000000000000',
-                            'name': 'Time-Dynamic Variable Output'
                         }, {
                             'id': '00000000-0000-0000-0000-000000000000',
                             'name': 'Time-Integrated Variable Output'

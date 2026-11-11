@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session, object_session
 from tethysext.atcore.models.app_users import Resource
 
-from tribs_adapter.common.file_to_dataset import FILE_TO_DATASET
+from tribs_adapter.common.file_to_dataset import FILE_TO_DATASET, VORONOI_OUTPUT_EXTENSIONS
 from tribs_adapter.io.input_file import FileDatabasePath
 from tribs_adapter.services.tribs_spatial_manager import TribsSpatialManager
 from .mixins import InputFileAttrMixin, LinkMixin, SridAttrMixin
@@ -186,6 +186,14 @@ class Realization(Resource, InputFileAttrMixin, SridAttrMixin, LinkMixin):
         for card, field in tribs_input.files(mode=tribs_input.FilesMode.OUTPUT_ONLY):
             # Get paths for the card
             existing_file_paths = tribs_input.expand_paths(card, model_root)
+
+            # tRIBS writes the Voronoi polygon file (<OUTFILENAME>_voi) alongside the spatial variable output.
+            # Keep it with the spatial output datasets: it is used to render the variables on the Voronoi cells.
+            voi_path = Path(model_root) / f'{tribs_input.get_value(card).path}_voi'
+            if voi_path.is_file():
+                for ext in VORONOI_OUTPUT_EXTENSIONS:
+                    if existing_file_paths.get(ext) and voi_path not in existing_file_paths[ext]:
+                        existing_file_paths[ext].append(voi_path)
 
             # NOTE: Both output cards expect existing_file_paths to be a dictionary of file paths so assuming that here
             # Create a dataset for each

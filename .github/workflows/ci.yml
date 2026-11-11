@@ -38,7 +38,9 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    # Pinned: the bundled tRIBSpar binary links against OpenMPI 4 (libmpi_cxx.so.40). Ubuntu 26.04 only has
+    # OpenMPI 5, which dropped that library, so the binary cannot start on ubuntu-latest.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash -el {0}

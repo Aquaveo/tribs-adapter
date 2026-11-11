@@ -25,6 +25,17 @@ def get_output_file_variables(output_file):
     return headers
 
 
+def get_output_file_units(output_file):
+    """The units of each variable of an mrf/rft file, from its second line: ``{'Srf': 'm3/s', 'FState': None, ...}``.
+    ``[]`` (no units) becomes None. Variables without an entry on the units line are left out."""
+    with open(output_file, 'r') as f:
+        header = f.readline()
+        units_line = f.readline()
+    names = [x.strip() for x in header.split('\t') if x.strip()]
+    units = [x.strip() for x in units_line.split('\t') if x.strip()]
+    return {name: (None if unit in ('[]', '[-]', '-') else unit) for name, unit in zip(names, units)}
+
+
 def get_origin(nodes):
     """Calculate the origin of the pixel files."""
     # Get the origin of the pixel files
@@ -79,7 +90,17 @@ def get_nodes(nodes_file, srid, flatten_extents=False):
 
 
 def generate_czml_for_pixel_files(
-    nodes_file, pixel_files, start_date, run_time, interval, path_to_write, dataset_id=None, variable=None, srid=32612
+    nodes_file,
+    pixel_files,
+    start_date,
+    run_time,
+    interval,
+    path_to_write,
+    dataset_id=None,
+    variable=None,
+    srid=32612,
+    legend_title=None,
+    legend_factor=1.0,
 ):
     """Generate CZML for pixel files."""
     # Read the nodes file
@@ -113,7 +134,7 @@ def generate_czml_for_pixel_files(
         )
 
     # Get the CZML
-    czml_gen.write_czml(path_to_write, legend=True)
+    czml_gen.write_czml(path_to_write, legend=True, legend_title=legend_title, legend_factor=legend_factor)
 
 
 def generate_czml_for_qout_files(
@@ -125,7 +146,9 @@ def generate_czml_for_qout_files(
     path_to_write,
     dataset_id=None,
     variable=None,
-    srid=32612
+    srid=32612,
+    legend_title=None,
+    legend_factor=1.0
 ):
     """Generate CZML for output files."""
     # Read the nodes file
@@ -169,7 +192,7 @@ def generate_czml_for_qout_files(
         )
 
     # Get the CZML
-    czml_gen.write_czml(path_to_write, legend=True)
+    czml_gen.write_czml(path_to_write, legend=True, legend_title=legend_title, legend_factor=legend_factor)
 
 
 def generate_czml_for_mrf_and_rft_files(
@@ -181,7 +204,9 @@ def generate_czml_for_mrf_and_rft_files(
     path_to_write,
     dataset_id=None,
     variable=None,
-    srid=32612
+    srid=32612,
+    legend_title=None,
+    legend_factor=1.0
 ):
     """Generate CZML for MRF and RFT files."""
     # Read the nodes file
@@ -214,7 +239,7 @@ def generate_czml_for_mrf_and_rft_files(
         )
 
     # Get the CZML
-    czml_gen.write_czml(path_to_write, legend=True)
+    czml_gen.write_czml(path_to_write, legend=True, legend_title=legend_title, legend_factor=legend_factor)
 
 
 def generate_czml_for_sdf_station(

@@ -632,7 +632,7 @@ def test_scenario_unlink_dataset(dataset_with_scenario_and_project):
 def test_scenario_delete_children(complete_project):
     project = complete_project
     session = object_session(project)
-    assert len(project.datasets) == 19
+    assert len(project.datasets) == 18
     assert len(project.scenarios) == 1
     assert len(project.scenarios[0].realizations) == 1
     scenario = project.scenarios[0]

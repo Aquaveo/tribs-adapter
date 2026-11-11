@@ -106,7 +106,12 @@ class CZMLGenerator:
         czml_polygon = CzmlPolygonData(polygon, data_values, id, start_time, run_time, interval)
         self.polygons.append(czml_polygon)
 
-    def write_czml(self, filename, legend=False):
+    def write_czml(self, filename, legend=False, legend_title=None, legend_factor=1.0):
+        """Write the CZML document and, with ``legend``, a legend PNG per geometry type. ``legend_title`` is drawn above
+        the legend and its tick values are the data values times ``legend_factor`` (display units). Colors follow the
+        display values too: with a negative ``legend_factor`` the largest display value (the smallest data value) gets
+        the high end of the color ramp, so the colors always match the legend."""
+        reverse = legend_factor < 0
         czml = [{
             "id": "document",
             "name": self.name,
@@ -114,21 +119,25 @@ class CZMLGenerator:
         }]
 
         for point in self.points:
-            czml.append(self._generate_point_czml(point))
+            czml.append(self._generate_point_czml(point, reverse=reverse))
 
         for polygon in self.polygons:
-            czml.append(self._generate_polygon_czml(polygon))
+            czml.append(self._generate_polygon_czml(polygon, reverse=reverse))
 
         with open(filename, 'w') as f:
             json.dump(czml, f, indent=4)
 
         if legend:
             if len(self.points) > 0:
-                self.generate_point_legend(filename.replace('.czml', '_point_legend.png'))
+                self.generate_point_legend(
+                    filename.replace('.czml', '_point_legend.png'), title=legend_title, factor=legend_factor
+                )
             if len(self.polygons) > 0:
-                self.generate_polygon_legend(filename.replace('.czml', '_polygon_legend.png'))
+                self.generate_polygon_legend(
+                    filename.replace('.czml', '_polygon_legend.png'), title=legend_title, factor=legend_factor
+                )
 
-    def _generate_point_czml(self, point):
+    def _generate_point_czml(self, point, reverse=False):
         min_point_value = np.min([np.min(point.values) for point in self.points])
         max_point_value = np.max([np.max(point.values) for point in self.points])
         czml = {
@@ -155,19 +164,21 @@ class CZMLGenerator:
             czml["position"]["epoch"] = f"{self._format_date(point.start_time)}"
 
             if point.values is not None:
+                colors = self._get_colors_for_values(
+                    point.values, min=min_point_value, max=max_point_value, reverse=reverse
+                )
                 czml["point"]["color"] = [
                     {
                         "interval":
                             f"{self._format_date(point.start_time + timedelta(hours=i*point.interval))}/"
                             f"{self._format_date(point.start_time + timedelta(hours=i*point.interval+point.interval))}",
                         "rgba": color.tolist() + [255]
-                    } for i, color in
-                    enumerate(self._get_colors_for_values(point.values, min=min_point_value, max=max_point_value))
+                    } for i, color in enumerate(colors)
                 ]
 
         return czml
 
-    def _generate_polygon_czml(self, polygon):
+    def _generate_polygon_czml(self, polygon, reverse=False):
         min_polygon_value = np.min([np.min(polygon.values) for polygon in self.polygons])
         max_polygon_value = np.max([np.max(polygon.values) for polygon in self.polygons])
         czml = {
@@ -200,25 +211,30 @@ class CZMLGenerator:
                         f"{self._format_date(polygon.start_time + timedelta(hours=i*p_interval+p_interval))}",
                     "rgba": color.tolist() + [175]
                 } for i, color in enumerate(
-                    self._get_colors_for_values(polygon.values, min=min_polygon_value, max=max_polygon_value)
+                    self._get_colors_for_values(
+                        polygon.values, min=min_polygon_value, max=max_polygon_value, reverse=reverse
+                    )
                 )]
 
         return czml
 
-    def generate_point_legend(self, filename):
+    def generate_point_legend(self, filename, title=None, factor=1.0):
         min_point_value = np.min([np.min(point.values) for point in self.points])
         max_point_value = np.max([np.max(point.values) for point in self.points])
-        self._generate_legend(min_point_value, max_point_value, filename)
+        self._generate_legend(min_point_value, max_point_value, filename, title=title, factor=factor)
 
-    def generate_polygon_legend(self, filename):
+    def generate_polygon_legend(self, filename, title=None, factor=1.0):
         min_polygon_value = np.min([np.min(polygon.values) for polygon in self.polygons])
         max_polygon_value = np.max([np.max(polygon.values) for polygon in self.polygons])
-        self._generate_legend(min_polygon_value, max_polygon_value, filename)
+        self._generate_legend(min_polygon_value, max_polygon_value, filename, title=title, factor=factor)
 
-    def _generate_legend(self, min_val, max_val, legend_path):
+    def _generate_legend(self, min_val, max_val, legend_path, title=None, factor=1.0):
         # Create a colormap from white to blue
         colormap = mcolors.LinearSegmentedColormap.from_list("WtoB", ["white", "blue"])
 
+        # Display units, low to high. A negative factor swaps the ends; the colors are reversed to match (see
+        # ``_get_colors_for_values``), so the low end of the ramp is always the smallest display value.
+        min_val, max_val = sorted((min_val * factor, max_val * factor))
         if max_val - min_val == 0:
             max_val += 1  # This way the range looks a little better on the legend.
 
@@ -236,13 +252,18 @@ class CZMLGenerator:
         ax.set_xticks(ticks * (gradient.shape[1] - 1))
         ax.set_xticklabels([f'{label:.5f}' for label in tick_labels])
         ax.set_yticks([])
+        if title:
+            ax.set_title(title, fontsize=10)
 
         # Save the figure as a PNG file
         plt.savefig(legend_path, bbox_inches='tight')
         plt.close()
 
     @staticmethod
-    def _get_colors_for_values(numbers, min=None, max=None):
+    def _get_colors_for_values(numbers, min=None, max=None, reverse=False):
+        """Colors (8-bit RGB) for the numbers, scaled from ``min`` to ``max`` (default: the range of the numbers) on the
+        white to blue ramp. ``reverse`` runs the ramp from ``max`` to ``min`` instead, for values whose display
+        conversion factor is negative (the smallest number is then the largest display value)."""
         # Scale the numbers to range 0-1    # Calculate the min, max and range of the numbers
         if min is None:
             min_val = np.min(numbers)
@@ -262,6 +283,8 @@ class CZMLGenerator:
 
         # Otherwise, scale the numbers to range 0-1
         scaled_numbers = (np.array(numbers) - min_val) / range_val
+        if reverse:
+            scaled_numbers = 1.0 - scaled_numbers
 
         # Create a colormap that goes from green to red
         colormap = mcolors.LinearSegmentedColormap.from_list("WtoB", ["white", "blue"])

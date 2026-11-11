@@ -36,6 +36,8 @@ class DatasetTypes(StrEnum):
     TRIBS_OUT_RFT = auto()
     TRIBS_OUT_PIXEL = auto()
     TRIBS_OUT_QOUT = auto()
+    # Legacy (2026-10-30): time-dynamic _d output is no longer turned into a dataset. The member stays so datasets
+    # created earlier still load and can be removed (``tribs delete-datasets --dataset-type TRIBS_OUT_TIME_DYNAMIC``).
     TRIBS_OUT_TIME_DYNAMIC = auto()
     TRIBS_OUT_TIME_INTEGRATED = auto()
     TRIBS_OUT_STATIONS = auto()
