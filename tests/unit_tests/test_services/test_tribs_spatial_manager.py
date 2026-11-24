@@ -17,6 +17,26 @@ def _touch(path):
     return str(path)
 
 
+def test_files_to_visualize_keeps_only_the_last_time_integrated_file():
+    files = ['/out/salas.0240_00i', '/out/salas.0000_00i', '/out/salas.1000_00i', '/out/salas.0120_30i']
+
+    assert TribsSpatialManager._files_to_visualize(files) == ['/out/salas.1000_00i']
+
+
+def test_files_to_visualize_keeps_a_single_time_integrated_file():
+    assert TribsSpatialManager._files_to_visualize(['/out/salas.0700_00i']) == ['/out/salas.0700_00i']
+
+
+def test_files_to_visualize_keeps_every_time_dynamic_file():
+    files = ['/out/salas.0006_00d', '/out/salas.0000_00d', '/out/salas.0012_00d']
+
+    assert TribsSpatialManager._files_to_visualize(files) == files
+
+
+def test_files_to_visualize_without_output_files():
+    assert TribsSpatialManager._files_to_visualize([]) == []
+
+
 def test_is_tribs_variable_output_file(tmp_path):
     assert TribsSpatialManager._is_tribs_variable_output_file(_touch(tmp_path / 'salas.0000_00d'))
     assert TribsSpatialManager._is_tribs_variable_output_file(_touch(tmp_path / 'salas.0700_00i'))

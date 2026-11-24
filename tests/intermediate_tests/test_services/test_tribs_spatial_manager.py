@@ -97,21 +97,26 @@ def _gltf_file_counts(dataset_path):
 
 
 def test_create_time_integrated_raster_layer(tsm, time_integrated_dataset, node_file_dataset):
-    """Without a variable table every column of the _i files is rendered, one time series per variable; the columns
-    that are the same in both files (node and soil attributes) share one glTF file between their time steps."""
+    """Time-integrated output is shown at the end of the run only: of the _i files (hour 0 and hour 10) the last one
+    is rendered, so every variable has a single time step. Without a variable table every column is rendered."""
     meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_integrated_dataset)
 
     dataset_path = time_integrated_dataset.file_collection_client.path
-    # 55 variables, 7 of them changing between the 2 time steps; one legend per variable
-    assert _gltf_file_counts(dataset_path) == (62, 55)
-    assert len(meta['files']) == 110  # every variable still has both time steps
+    # 55 variables, one glTF file and one legend each, all from the last file
+    assert _gltf_file_counts(dataset_path) == (55, 55)
+    assert len(meta['files']) == 55
+    assert {os.path.basename(f['output_file']) for f in meta['files']} == {'examplebasin.0010_00i'}
+    # The dataset keeps both _i files
+    assert {f for f in os.listdir(dataset_path) if f.endswith('_00i')} == {
+        'examplebasin.0000_00i', 'examplebasin.0010_00i'
+    }
 
     # The viz attribute groups the glTF files into per-variable time series and survives JSON serialization
     viz = tsm._build_gltf_viz(
         time_integrated_dataset, meta, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=10
     )
     assert viz['type'] == 'gltf'
-    assert len(viz['url']) == 62 and len(viz['legend']) == 55
+    assert len(viz['url']) == 55 and len(viz['legend']) == 55
     assert viz['url'] == sorted(viz['url'])
     url_dir = os.path.join(
         str(time_integrated_dataset.file_collection.file_database_id), str(time_integrated_dataset.file_collection.id),
@@ -121,17 +126,15 @@ def test_create_time_integrated_raster_layer(tsm, time_integrated_dataset, node_
     variables = {v['name']: v for v in viz['variables']}
     assert 'ID' not in variables and 'BndCd' not in variables
     assert 'AvLeafAI' in variables
-    z = variables['Z']  # elevation never changes: both time steps show the same file
-    assert [t['hours'] for t in z['timesteps']] == [0, 10]
-    assert z['timesteps'][0]['url'] == z['timesteps'][1]['url'] and z['timesteps'][0]['url'].endswith('0000_00i_Z.glb')
     av_sm = variables['AvSM']
-    assert [t['hours'] for t in av_sm['timesteps']] == [0, 10]
-    assert av_sm['step_hours'] == 10
-    # The value range the colors are scaled to over all time steps, for client-drawn legends
+    # One time step, at the time of the last file: this is the time the legend shows
+    (step,) = av_sm['timesteps']
+    assert (step['hours'], step['time']) == (10, '2004-06-01T10:00:00Z')
+    assert step['url'].endswith('0010_00i_AvSM.glb') and step['legend'].endswith('_AvSM_legend.png')
+    assert av_sm['start'] == av_sm['end'] == '2004-06-01T10:00:00Z'
+    # The value range the colors are scaled to, for client-drawn legends
     assert isinstance(av_sm['min'], float) and isinstance(av_sm['max'], float) and av_sm['min'] < av_sm['max']
-    assert av_sm['start'] == '2004-06-01T00:00:00Z' and av_sm['end'] == '2004-06-01T10:00:00Z'
-    assert av_sm['timesteps'][0]['url'] in viz['url'] and av_sm['timesteps'][0]['legend'] in viz['legend']
-    assert av_sm['timesteps'][0]['url'] != av_sm['timesteps'][1]['url']
+    assert step['url'] in viz['url'] and step['legend'] in viz['legend']
 
     time_integrated_dataset.set_attribute('viz', viz)
     serialized = time_integrated_dataset.serialize()
@@ -145,9 +148,9 @@ def test_create_time_integrated_layer_offers_only_sheet_variables(tsm, time_inte
     """With the integrated variable table only priority and secondary variables are rendered, labelled and scaled."""
     meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_integrated_dataset, variable_kind='integrated')
     dataset_path = time_integrated_dataset.file_collection_client.path
-    # examplebasin _i header: 6 priority (Z, AvSM, AvRtM, peakWE, cSnSub, cSnEvap) + 9 secondary; 3 of the 15
-    # (AvSM, AvRtM, EvpFrct) change between the 2 time steps
-    assert _gltf_file_counts(dataset_path) == (18, 15)
+    # examplebasin _i header: 6 priority (Z, AvSM, AvRtM, peakWE, cSnSub, cSnEvap) + 9 secondary, each written once
+    # (from the last file)
+    assert _gltf_file_counts(dataset_path) == (15, 15)
     written = [f['variable'] for f in meta['files']]
     assert 'BndCd' not in written and 'Ks' not in written and 'VAr' not in written
 

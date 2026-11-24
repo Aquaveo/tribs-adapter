@@ -834,6 +834,7 @@ class TribsSpatialManager(ResourceSpatialManager):
                 os.path.join(output_collection_path, f) for f in os.listdir(output_collection_path)
                 if self._is_tribs_variable_output_file(os.path.join(output_collection_path, f))
             ]
+            output_files = self._files_to_visualize(output_files)
 
         # Find the tRIBS Voronoi polygon file (_voi) that goes with the mesh, if there is one. Output variables are
         # rendered on the Voronoi cells, which are computed from the TIN when no _voi file is available.
@@ -873,6 +874,19 @@ class TribsSpatialManager(ResourceSpatialManager):
         # Add the gltf to the dataset
         dataset_to_add_to.file_collection_client.add_item(gltf_path)
         return meta
+
+    @staticmethod
+    def _files_to_visualize(output_files):
+        """The output files a layer is built from. Time-integrated (``_00i``) files hold values accumulated since the
+        start of the run, so only the last one is shown (tRIBS also writes one at hour 0, before anything has
+        accumulated); the layer then has a single time step, at the end of the run. Time-dynamic (``_00d``) files are
+        all kept: each is one time step. The dataset keeps every file either way.
+        """
+        time_stamps = {f: parse_output_file_name(f) for f in output_files}
+        integrated = [f for f in output_files if time_stamps[f] is not None and time_stamps[f]['kind'] == 'i']
+        if len(integrated) != len(output_files) or not integrated:
+            return output_files
+        return [max(integrated, key=lambda f: time_stamps[f]['total_hours'])]
 
     @staticmethod
     def _is_tribs_variable_output_file(path):
