@@ -180,3 +180,11 @@ def test_read_basin_file_pairs_units_by_position(tmp_path):
     _, units = nts.read_basin_file(_write(tmp_path / 'salas0240_00.mrf', text))
 
     assert units == {'Time': 'hr', 'Srf': 'm3/s', 'FState': None, 'MAP': 'mm/hr'}
+
+
+def test_pixel_files_by_node_uses_the_first_file_by_name_for_a_node_named_twice(tmp_path, caplog):
+    first = _write(tmp_path / 'examplebasin1656.pixel', PLAIN_PIXEL)
+    second = _write(tmp_path / 'smallbasin1656.pixel', PLAIN_PIXEL)
+
+    assert nts.pixel_files_by_node([second, first]) == {1656: first}
+    assert 'smallbasin1656.pixel is for the same node as examplebasin1656.pixel' in caplog.text

@@ -131,8 +131,18 @@ def pixel_file_node(path):
 
 def pixel_files_by_node(pixel_files):
     """``{node ID: path}`` of ``.pixel`` files, by the node ID in the first data row of each file. The file name is
-    not used: ``salas1656.pixel`` also ends in 56 and 6."""
-    return {pixel_file_node(path): path for path in pixel_files}
+    not used: ``salas1656.pixel`` also ends in 56 and 6. When two files are for the same node, the first by file
+    name is used, for the map and the plot alike, and the other is logged."""
+    by_node = {}
+    for path in sorted(pixel_files, key=os.path.basename):
+        node = pixel_file_node(path)
+        if node in by_node:
+            log.warning(
+                f'{os.path.basename(path)} is for the same node as {os.path.basename(by_node[node])}: ignored.'
+            )
+            continue
+        by_node[node] = path
+    return by_node
 
 
 def qout_point(path):
