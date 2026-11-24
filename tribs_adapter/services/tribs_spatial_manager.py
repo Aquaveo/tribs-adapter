@@ -33,7 +33,8 @@ from tribs_adapter.common.czml_converters import generate_czml_for_pixel_files, 
     generate_czml_for_qout_files, get_file_variables, get_output_file_units, get_output_file_variables, get_extents, \
     get_nodes, generate_czml_for_sdf_station, reproject
 from tribs_adapter.common.output_variables import (
-    describe as describe_variable, kind_for_dataset_type, scale_range, split_unit_suffix, visible_variables
+    derived_terms, derived_variables, describe as describe_variable, kind_for_dataset_type, scale_range,
+    split_unit_suffix, visible_variables
 )
 from tribs_adapter.io.tribs_mesh import tRIBSMeshViz, parse_output_file_name
 
@@ -319,14 +320,18 @@ class TribsSpatialManager(ResourceSpatialManager):
             output_node_file = linked_realization.input_file.files_and_pathnames.mesh_generation.INPUTDATAFILE
             node_file_dataset = session.query(Dataset).get(str(output_node_file.resource_id))
             # The variable table (friendly labels, display units, priority tiers) for this kind of output file, if
-            # the sheet covers it (integrated _i output; legacy time-dynamic _d datasets have no table).
+            # the sheet covers it (integrated _i and time-dynamic _d output).
             variable_kind = kind_for_dataset_type(dataset.dataset_type)
+            time_variables = linked_realization.input_file.run_parameters.time_variables
+            # METSTEP (minutes) turns the depths tRIBS writes per meteorological time step into hourly rates
+            met_step = time_variables.METSTEP
+            met_step_hours = met_step / 60.0 if isinstance(met_step, (int, float)) and met_step > 0 else 1.0
             gltf_meta = self.create_tribs_tin_layer(
-                node_file_dataset, mesh_epsg=srid, output_dataset=dataset, variable_kind=variable_kind
+                node_file_dataset, mesh_epsg=srid, output_dataset=dataset, variable_kind=variable_kind,
+                met_step_hours=met_step_hours,
             )
             # Time axis of the spatial output: STARTDATE anchors the hours parsed from the output file names, and
             # SPOPINTRVL (spatial output interval) is the fallback step when there is a single output file.
-            time_variables = linked_realization.input_file.run_parameters.time_variables
             start_date = time_variables.STARTDATE
             if not isinstance(start_date, datetime.datetime):
                 log.warning(f'Could not parse STARTDATE ({start_date!r}) of realization {linked_realization.id}.')
@@ -778,7 +783,7 @@ class TribsSpatialManager(ResourceSpatialManager):
         )
 
     def create_tribs_tin_layer(
-        self, dataset, mesh_epsg, output_dataset=None, output_variables=None, variable_kind=None
+        self, dataset, mesh_epsg, output_dataset=None, output_variables=None, variable_kind=None, met_step_hours=1.0
     ):
         """
         Write the glTF visualization (Voronoi cells draped on the TIN) for a tRIBS mesh dataset.
@@ -791,7 +796,12 @@ class TribsSpatialManager(ResourceSpatialManager):
                 the output files, or, with ``variable_kind``, to the variables the sheet offers (priority and
                 secondary tiers; hidden and ignored variables are not rendered).
             variable_kind(str): Variable table of the output files (``output_variables.QOUT`` etc., see
-                ``kind_for_dataset_type``). Labels the legends with friendly names and display units.
+                ``kind_for_dataset_type``). Labels the legends with friendly names and display units, and adds the
+                table's derived variables (sums of columns, such as snow water equivalent) when the files have the
+                columns they are made of; those columns are then not rendered by themselves (for any of the output
+                files, which are expected to share one header).
+            met_step_hours(float): Meteorological time step of the run (METSTEP) in hours, for derived variables that
+                include a depth per time step.
         """
         # Get Path to dataset workspace
         collection_path = dataset.file_collection_client.path
@@ -824,6 +834,7 @@ class TribsSpatialManager(ResourceSpatialManager):
                 os.path.join(output_collection_path, f) for f in os.listdir(output_collection_path)
                 if self._is_tribs_variable_output_file(os.path.join(output_collection_path, f))
             ]
+            output_files = self._files_to_visualize(output_files)
 
         # Find the tRIBS Voronoi polygon file (_voi) that goes with the mesh, if there is one. Output variables are
         # rendered on the Voronoi cells, which are computed from the TIN when no _voi file is available.
@@ -834,6 +845,9 @@ class TribsSpatialManager(ResourceSpatialManager):
         variable_labels = None
         if variable_kind is not None and output_files:
             columns = list(dict.fromkeys(c for f in output_files for c in tribs_mesh.data[f].keys()))
+            for derived in derived_variables(variable_kind, columns):
+                if tribs_mesh.add_derived_variable(derived.name, derived_terms(derived, met_step_hours)):
+                    columns.append(derived.name)
             if output_variables is None:
                 output_variables = visible_variables(variable_kind, columns)
             # Legends are drawn without a title: the app writes the dataset, variable and units around the scale.
@@ -860,6 +874,19 @@ class TribsSpatialManager(ResourceSpatialManager):
         # Add the gltf to the dataset
         dataset_to_add_to.file_collection_client.add_item(gltf_path)
         return meta
+
+    @staticmethod
+    def _files_to_visualize(output_files):
+        """The output files a layer is built from. Time-integrated (``_00i``) files hold values accumulated since the
+        start of the run, so only the last one is shown (tRIBS also writes one at hour 0, before anything has
+        accumulated); the layer then has a single time step, at the end of the run. Time-dynamic (``_00d``) files are
+        all kept: each is one time step. The dataset keeps every file either way.
+        """
+        time_stamps = {f: parse_output_file_name(f) for f in output_files}
+        integrated = [f for f in output_files if time_stamps[f] is not None and time_stamps[f]['kind'] == 'i']
+        if len(integrated) != len(output_files) or not integrated:
+            return output_files
+        return [max(integrated, key=lambda f: time_stamps[f]['total_hours'])]
 
     @staticmethod
     def _is_tribs_variable_output_file(path):

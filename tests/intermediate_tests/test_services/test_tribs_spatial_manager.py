@@ -97,19 +97,26 @@ def _gltf_file_counts(dataset_path):
 
 
 def test_create_time_integrated_raster_layer(tsm, time_integrated_dataset, node_file_dataset):
-    """Without a variable table every column of the _i files is rendered, one time series per variable."""
+    """Time-integrated output is shown at the end of the run only: of the _i files (hour 0 and hour 10) the last one
+    is rendered, so every variable has a single time step. Without a variable table every column is rendered."""
     meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_integrated_dataset)
 
     dataset_path = time_integrated_dataset.file_collection_client.path
-    assert _gltf_file_counts(dataset_path) == (110, 55)  # 55 variables x 2 time steps, one legend per variable
-    assert len(meta['files']) == 110
+    # 55 variables, one glTF file and one legend each, all from the last file
+    assert _gltf_file_counts(dataset_path) == (55, 55)
+    assert len(meta['files']) == 55
+    assert {os.path.basename(f['output_file']) for f in meta['files']} == {'examplebasin.0010_00i'}
+    # The dataset keeps both _i files
+    assert {f for f in os.listdir(dataset_path) if f.endswith('_00i')} == {
+        'examplebasin.0000_00i', 'examplebasin.0010_00i'
+    }
 
     # The viz attribute groups the glTF files into per-variable time series and survives JSON serialization
     viz = tsm._build_gltf_viz(
         time_integrated_dataset, meta, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=10
     )
     assert viz['type'] == 'gltf'
-    assert len(viz['url']) == 110 and len(viz['legend']) == 55
+    assert len(viz['url']) == 55 and len(viz['legend']) == 55
     assert viz['url'] == sorted(viz['url'])
     url_dir = os.path.join(
         str(time_integrated_dataset.file_collection.file_database_id), str(time_integrated_dataset.file_collection.id),
@@ -119,13 +126,15 @@ def test_create_time_integrated_raster_layer(tsm, time_integrated_dataset, node_
     variables = {v['name']: v for v in viz['variables']}
     assert 'ID' not in variables and 'BndCd' not in variables
     assert 'AvLeafAI' in variables
-    z = variables['Z']
-    assert [t['hours'] for t in z['timesteps']] == [0, 10]
-    assert z['step_hours'] == 10
-    # The value range the colors are scaled to over all time steps, for client-drawn legends
-    assert isinstance(z['min'], float) and isinstance(z['max'], float) and z['min'] < z['max']
-    assert z['start'] == '2004-06-01T00:00:00Z' and z['end'] == '2004-06-01T10:00:00Z'
-    assert z['timesteps'][0]['url'] in viz['url'] and z['timesteps'][0]['legend'] in viz['legend']
+    av_sm = variables['AvSM']
+    # One time step, at the time of the last file: this is the time the legend shows
+    (step,) = av_sm['timesteps']
+    assert (step['hours'], step['time']) == (10, '2004-06-01T10:00:00Z')
+    assert step['url'].endswith('0010_00i_AvSM.glb') and step['legend'].endswith('_AvSM_legend.png')
+    assert av_sm['start'] == av_sm['end'] == '2004-06-01T10:00:00Z'
+    # The value range the colors are scaled to, for client-drawn legends
+    assert isinstance(av_sm['min'], float) and isinstance(av_sm['max'], float) and av_sm['min'] < av_sm['max']
+    assert step['url'] in viz['url'] and step['legend'] in viz['legend']
 
     time_integrated_dataset.set_attribute('viz', viz)
     serialized = time_integrated_dataset.serialize()
@@ -139,8 +148,9 @@ def test_create_time_integrated_layer_offers_only_sheet_variables(tsm, time_inte
     """With the integrated variable table only priority and secondary variables are rendered, labelled and scaled."""
     meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_integrated_dataset, variable_kind='integrated')
     dataset_path = time_integrated_dataset.file_collection_client.path
-    # examplebasin _i header: 6 priority (Z, AvSM, AvRtM, peakWE, cSnSub, cSnEvap) + 9 secondary, 2 time steps
-    assert _gltf_file_counts(dataset_path) == (30, 15)
+    # examplebasin _i header: 6 priority (Z, AvSM, AvRtM, peakWE, cSnSub, cSnEvap) + 9 secondary, each written once
+    # (from the last file)
+    assert _gltf_file_counts(dataset_path) == (15, 15)
     written = [f['variable'] for f in meta['files']]
     assert 'BndCd' not in written and 'Ks' not in written and 'VAr' not in written
 
@@ -156,6 +166,75 @@ def test_create_time_integrated_layer_offers_only_sheet_variables(tsm, time_inte
     tsm.delete_tribs_tin_layer(time_integrated_dataset)
 
 
+def test_create_time_dynamic_layer_scales_snow_losses_by_the_met_time_step(
+    tsm, time_dynamic_dataset, node_file_dataset, mocker
+):
+    """The snow losses in total ET are depths per met time step: with a half-hour step they count double per hour."""
+    from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
+    add = mocker.spy(tRIBSMeshViz, 'add_derived_variable')
+
+    tsm.create_tribs_tin_layer(
+        node_file_dataset, 32613, time_dynamic_dataset, output_variables=['TotalET'], variable_kind='dynamic',
+        met_step_hours=0.5,
+    )
+
+    terms = {call.args[1]: call.args[2] for call in add.call_args_list}
+    assert terms['TotalET'] == [('ET', 1.0), ('SnSub', -20.0), ('SnEvap', -20.0), ('IntSub', -20.0)]
+    assert terms['SnowWE'] == [('IWE', 10.0), ('LWE', 10.0)]
+    tsm.delete_tribs_tin_layer(time_dynamic_dataset)
+
+
+def test_create_time_dynamic_layer_offers_only_sheet_variables(tsm, time_dynamic_dataset, node_file_dataset):
+    """With the dynamic variable table the priority and secondary variables are rendered, then the columns the sheet
+    does not list. Snow water equivalent and total ET are computed from their columns, which are then not rendered
+    by themselves. A variable that is the same in both time steps is written once and shared by them."""
+    meta = tsm.create_tribs_tin_layer(
+        node_file_dataset, 32613, time_dynamic_dataset, variable_kind='dynamic', met_step_hours=1.0
+    )
+    dataset_path = time_dynamic_dataset.file_collection_client.path
+    gltf_files = os.listdir(os.path.join(dataset_path, 'gltf'))
+    written = [f['variable'] for f in meta['files']]
+    # 21 variables. SoilID and LUseID are only in the first file; the other 19 have an entry per time step, and
+    # those that do not change between the 2 time steps share one glTF file.
+    assert len(written) == 19 * 2 + 2
+    distinct_files = {os.path.basename(f['gltf']) for f in meta['files']}
+    assert sorted(f for f in gltf_files if f.endswith('.glb')) == sorted(distinct_files)
+    assert 21 < len(distinct_files) < len(written)
+    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 21
+    assert not {'ID', 'Mu', 'Mi', 'Upack', 'StomRes'} & set(written)  # index, hidden and ignored columns
+    assert not {'IWE', 'LWE', 'SnSub', 'SnEvap', 'IntSub', 'ET'} & set(written)  # shown combined instead
+
+    viz = tsm._build_gltf_viz(
+        time_dynamic_dataset, meta, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=10,
+        variable_kind='dynamic',
+    )
+    names = [v['name'] for v in viz['variables']]
+    # This build has no SnMelt column and writes VegFraction padded with spaces in the header
+    assert names == [
+        'Nwt', 'Rain', 'SnowWE', 'SoilMoist', 'RootMoist', 'EvpSoil', 'TotalET',
+        'Srf', 'GFlux', 'HFlux', 'LFlux', 'Qstrm', 'VegFraction', 'LeafAI',
+        'Z', 'S', 'CAr', 'SWE', 'DU', 'SoilID', 'LUseID',
+    ]
+    assert [v['tier'] for v in viz['variables']] == ['priority'] * 7 + ['secondary'] * 7 + [None] * 7
+    variables = {v['name']: v for v in viz['variables']}
+    nwt = variables['Nwt']
+    assert (nwt['label'], nwt['units'], nwt['factor']) == ('Depth to Groundwater', 'm', 0.001)
+    snow_we, total_et = variables['SnowWE'], variables['TotalET']
+    assert (snow_we['label'], snow_we['units'], snow_we['factor']) == ('Snow Water Equivalent', 'mm', 1.0)
+    assert (total_et['label'], total_et['units'], total_et['factor']) == ('Evapotranspiration', 'mm/hr', 1.0)
+    assert total_et['min'] <= total_et['max'] and total_et['description']
+    steps = {name: [t['hours'] for t in v['timesteps']] for name, v in variables.items()}
+    assert steps.pop('SoilID') == [0] and steps.pop('LUseID') == [0]
+    assert set(map(tuple, steps.values())) == {(0, 10)}
+    urls = {name: [t['url'] for t in v['timesteps']] for name, v in variables.items()}
+    assert urls['VegFraction'][0] == urls['VegFraction'][1]  # never changes: one file for both time steps
+    assert urls['TotalET'][0] != urls['TotalET'][1]
+    json.dumps(viz)
+
+    tsm.delete_tribs_tin_layer(time_dynamic_dataset)
+    assert not os.path.exists(os.path.join(dataset_path, 'gltf'))
+
+
 def test_create_tribs_tin_layer(tsm, tin_dataset, tin_dataset_empty, tin_output_dataset):
     # Ensure empty dataset throws value error
     with pytest.raises(ValueError):
@@ -169,12 +248,13 @@ def test_create_tribs_tin_layer(tsm, tin_dataset, tin_dataset_empty, tin_output_
     assert os.path.exists(os.path.join(tin_dataset_path, 'gltf'))
     assert len(os.listdir(os.path.join(tin_dataset_path, 'gltf'))) == 2
 
-    tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'Z'])
-    assert _gltf_file_counts(tin_output_dataset_path) == (10, 2)  # 2 variables x 5 time steps, one legend each
+    tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'ET'])
+    # ET for each of the 5 time steps, the slope (the same in all of them) once; one legend each
+    assert _gltf_file_counts(tin_output_dataset_path) == (6, 2)
 
     # Creating the layer again replaces the files instead of adding to them
-    tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'Z'])
-    assert _gltf_file_counts(tin_output_dataset_path) == (10, 2)
+    tsm.create_tribs_tin_layer(tin_dataset, 32613, output_dataset=tin_output_dataset, output_variables=['S', 'ET'])
+    assert _gltf_file_counts(tin_output_dataset_path) == (6, 2)
 
     tsm.delete_tribs_tin_layer(tin_output_dataset)
     assert not os.path.exists(os.path.join(tin_output_dataset_path, 'gltf'))

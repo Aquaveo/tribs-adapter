@@ -691,6 +691,54 @@ class tRIBSMeshViz:
                 ranges[variable] = (low, high)
         return ranges
 
+    def add_derived_variable(self, name: str, terms: list) -> bool:
+        """Add a variable computed from other columns: the sum of ``value * factor`` over ``terms``.
+
+        Args:
+            name: Name of the new variable. An output file that already has a column of that name keeps it.
+            terms: ``[(column, factor), ...]``.
+
+        Returns:
+            Whether any output file got the variable. Only files that hold every column of ``terms`` do.
+        """
+        added = False
+        for output_file in self.output_files:
+            file_data = self.data[output_file]
+            if name in file_data or not terms or any(column not in file_data for column, _ in terms):
+                continue
+            file_data[name] = sum(np.asarray(file_data[column], dtype=np.float64) * factor for column, factor in terms)
+            self._cell_values_cache.pop((str(output_file), name), None)  # a lookup made before the column existed
+            added = True
+        return added
+
+    def _output_files_in_time_order(self) -> list:
+        """The output files sorted by the time stamp in their names; files without one come last, in the order given."""
+        def time_order(indexed_file):
+            index, output_file = indexed_file
+            time_stamp = parse_output_file_name(output_file)
+            return (time_stamp is None, time_stamp['total_hours'] if time_stamp else 0, index)
+
+        return [output_file for _, output_file in sorted(enumerate(self.output_files), key=time_order)]
+
+    def _unchanging_variables(self, output_variables: list = None) -> set:
+        """The variables that do not change over the run: every cell keeps its value from one output file to the
+        next, in every output file that holds the variable (land-use parameters such as ``VegFraction``, unless
+        dynamic land use is on). Writing such a variable for every time step would repeat the same glTF file once
+        per step. Variables in a single output file are left out: there is nothing to save.
+        """
+        first_values, file_count, changing = {}, {}, set()
+        for output_file in self.output_files:
+            for variable in self._output_file_variables(output_file, output_variables):
+                cell_values = self._cell_values(output_file, variable)
+                if cell_values is None or variable in changing:
+                    continue
+                file_count[variable] = file_count.get(variable, 0) + 1
+                if variable not in first_values:
+                    first_values[variable] = cell_values
+                elif cell_values != first_values[variable]:
+                    changing.add(variable)
+        return {variable for variable in first_values if variable not in changing and file_count[variable] > 1}
+
     def _cell_values(self, output_file: Path | str, output_variable: str) -> list | None:
         """Look up the value of an output variable for every Voronoi cell, joined by node ID.
 
@@ -767,7 +815,6 @@ class tRIBSMeshViz:
             Dictionary with metadata about the generated glTF files::
 
                 {
-                    'gltfs': [pygltflib.GLTF2, ...],
                     'origin': [lon, lat, z],
                     'extents': [min_x, min_y, max_x, max_y],
                     'files': [
@@ -778,7 +825,7 @@ class tRIBSMeshViz:
                     ],
                 }
 
-            ``files`` has one entry per glTF written, in the order they were written. For the bare mesh (no output
+            ``files`` has one entry per variable and output file, in time order. For the bare mesh (no output
             files) the single entry has ``variable='Elevation'`` and ``output_file``, ``hours`` and ``kind`` set to
             None. ``min`` and ``max`` are the value range the colors of the file are scaled to (None when the
             variable has no values), so a client can label its own legend.
@@ -786,9 +833,12 @@ class tRIBSMeshViz:
             The colors of an output variable are scaled to its minimum and maximum over all output files, so the
             same value has the same color in every time step and one legend (``<gltf_path>_<variable>_legend.png``)
             serves all of a variable's time steps. The bare mesh is scaled to its own elevation range.
+
+            A variable that does not change from one output file to the next (see ``_unchanging_variables``) is
+            written once, for its earliest time step: it still has a ``files`` entry per output file, and they all
+            name that one glTF file.
         """
         self.data  # Ensure data is loaded
-        generated_gltfs = []
         generated_files = []
         extension = self.GLB_EXTENSION if binary else self.GLTF_EXTENSION
 
@@ -822,7 +872,6 @@ class tRIBSMeshViz:
             gltf = self._set_materials(gltf)
             gltf_file_path = Path(f'{gltf_path}{extension}')
             gltf.save(str(gltf_file_path))
-            generated_gltfs.append(gltf)
             legend_path = None
             if generate_legend:
                 legend_path = str(gltf_file_path)[:-len(extension)] + '_legend.png'
@@ -837,7 +886,12 @@ class tRIBSMeshViz:
             # Colors are scaled per variable over every output file (time step), not per file, so values keep the
             # same color as the time steps animate and one legend serves the whole series.
             value_ranges = self._variable_value_ranges(output_variables)
-            for output_file in self.output_files:  # Get the file basename and clean out special characters
+            unchanging = self._unchanging_variables(output_variables)
+            shared_gltf_paths = {}  # unchanging variable -> the one glTF file written for it
+            # Earliest time step first, so the one file of an unchanging variable is that of its earliest time step
+            # and the entries are in a stable order (the order clients list the variables in).
+            for output_file in self._output_files_in_time_order():
+                # Get the file basename and clean out special characters
                 basefile_name = os.path.basename(output_file).replace('.', '-')
                 time_stamp = parse_output_file_name(output_file)
                 if time_stamp is None:
@@ -847,17 +901,25 @@ class tRIBSMeshViz:
                     value_range = value_ranges.get(variable)
                     # A constant variable sits at the bottom of the ramp and of its legend, whatever the factor
                     reverse = factor < 0 and value_range is not None and value_range[0] != value_range[1]
-                    gltf_file_path = Path(f'{gltf_path}_{basefile_name}_{variable}{extension}')
-                    gltf, _ = self._build_voronoi_gltf(
-                        localized_cells, cell_normals, output_file, variable, color_ramp_file=color_ramp_file,
-                        binary=binary, value_range=value_range, reverse=reverse,
-                    )
-                    if gltf is not None:
-                        gltf = self._set_materials(gltf)
-                        separator()
-                        log.debug("Saving glTF file...")
-                        gltf.save(str(gltf_file_path))
-                        generated_gltfs.append(gltf)
+                    gltf_file_path = None
+                    if self._cell_values(output_file, variable) is not None:  # this file has the variable
+                        gltf_file_path = shared_gltf_paths.get(variable)
+                    if gltf_file_path is None:
+                        gltf_file_path = Path(f'{gltf_path}_{basefile_name}_{variable}{extension}')
+                        gltf, _ = self._build_voronoi_gltf(
+                            localized_cells, cell_normals, output_file, variable, color_ramp_file=color_ramp_file,
+                            binary=binary, value_range=value_range, reverse=reverse,
+                        )
+                        if gltf is not None:
+                            gltf = self._set_materials(gltf)
+                            separator()
+                            log.debug("Saving glTF file...")
+                            gltf.save(str(gltf_file_path))
+                            if variable in unchanging:
+                                shared_gltf_paths[variable] = gltf_file_path
+                        else:
+                            gltf_file_path = None
+                    if gltf_file_path is not None:
                         value_range = value_ranges.get(variable, (None, None))
                         generated_files.append(dict(
                             variable=variable,
@@ -891,7 +953,6 @@ class tRIBSMeshViz:
         log.debug(f"Real-world Model Center Location: {model_center}")
         log.debug(f"Real-world CRS Center Location: {crs_center}")
         meta = dict(
-            gltfs=generated_gltfs,
             origin=model_center,
             extents=model_extents,
             files=generated_files,
