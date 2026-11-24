@@ -10,12 +10,15 @@ One place knows the file layouts, so the map layers and the plots read the same 
 
 The time of a row is the hour in its time column (hours since the start of the run), never its row number.
 """
+import logging
 import os
 import re
 
 import pandas as pd
 
 from tribs_adapter.common.output_variables import canonical_layer_name
+
+log = logging.getLogger(__name__)
 
 NODE_ID_COLUMN = 'NodeID'
 NODE_TIME_COLUMN = 'Time_hr'  # pixel and qout files
@@ -83,7 +86,8 @@ def read_basin_file(path):
 
     Returns:
         ``(frame, units)``: a DataFrame with one column per header column, and the units of each column from the
-        units line (``{'Srf': 'm3/s', 'FState': None}``; ``[]`` means no units).
+        units line (``{'Srf': 'm3/s', 'FState': None}``; ``[]`` or a blank cell means no units). Names and units are
+        paired by their position in the line, so a blank unit does not shift the ones after it.
 
     Raises:
         ValueError: naming the file, when it has no ``Time`` column, a row does not match the header or there is no
@@ -91,36 +95,72 @@ def read_basin_file(path):
     """
     with open(path, 'r') as f:
         lines = f.readlines()
-    # mrf/rft names carry no units (those are on the next line), so they are only made safe as layer names
-    header = lines[0].split('\t') if lines else []
-    columns = [column.strip().replace(',', '_').replace('/', '-') for column in header if column.strip()]
+    header = lines[0].rstrip('\r\n').split('\t') if lines else []
+    unit_cells = lines[1].rstrip('\r\n').split('\t') if len(lines) > 1 else []
+    columns, units = [], {}
+    for position, cell in enumerate(header):
+        if not cell.strip():
+            continue
+        # mrf/rft names carry no units (those are on the next line), so they are only made safe as layer names
+        column = cell.strip().replace(',', '_').replace('/', '-')
+        columns.append(column)
+        token = unit_cells[position].strip() if position < len(unit_cells) else ''
+        units[column] = None if token in ('', '[]', '[-]', '-') else token
     if BASIN_TIME_COLUMN not in columns:
         raise ValueError(f'Could not find the {BASIN_TIME_COLUMN} column in the header of {os.path.basename(path)}.')
-    unit_tokens = [token.strip() for token in lines[1].split('\t') if token.strip()] if len(lines) > 1 else []
-    units = {
-        column: (None if token in ('[]', '[-]', '-') else token) for column, token in zip(columns, unit_tokens)
-    }
     return _read_rows(path, enumerate(lines[2:], start=3), columns), units
+
+
+def pixel_file_node(path):
+    """The node ID a ``.pixel`` file is for: the one in its first data row. Only the top of the file is read."""
+    name = os.path.basename(path)
+    with open(path, 'r') as f:
+        columns = parse_header(f.readline())
+        if NODE_ID_COLUMN not in columns:
+            raise ValueError(f'Could not find the {NODE_ID_COLUMN} column in the header of {name}.')
+        for line in f:
+            tokens = line.split()
+            if not tokens:
+                continue
+            try:
+                return int(float(tokens[columns.index(NODE_ID_COLUMN)]))
+            except (IndexError, ValueError):
+                raise ValueError(f'Could not read the node ID in the first data row of {name}.') from None
+    raise ValueError(f'{name} has no data rows.')
 
 
 def pixel_files_by_node(pixel_files):
     """``{node ID: path}`` of ``.pixel`` files, by the node ID in the first data row of each file. The file name is
     not used: ``salas1656.pixel`` also ends in 56 and 6."""
-    by_node = {}
-    for path in pixel_files:
-        frame = read_node_file(path)
-        if NODE_ID_COLUMN not in frame.columns:
-            raise ValueError(f'Could not find the {NODE_ID_COLUMN} column in the header of {os.path.basename(path)}.')
-        by_node[int(frame[NODE_ID_COLUMN].iloc[0])] = path
-    return by_node
+    return {pixel_file_node(path): path for path in pixel_files}
 
 
 def qout_point(path):
     """The point a ``.qout`` file belongs to, from its name: ``'Outlet'`` for ``<base>_Outlet.qout``, else the node
-    ID as a string (``'1148'`` for ``<base>_1148.qout``)."""
-    return os.path.splitext(os.path.basename(path))[0].rsplit('_', 1)[-1]
+    ID as a string (``'1148'`` for ``<base>_1148.qout``).
+
+    Raises:
+        ValueError: naming the file, when its name does not end in ``_Outlet`` or ``_<node ID>``.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    point = stem.rsplit('_', 1)[-1] if '_' in stem else ''
+    if point != OUTLET and not point.isdigit():
+        raise ValueError(f'Could not tell the node of {os.path.basename(path)}: its name does not end in _Outlet '
+                         f'or _<node ID>.')
+    return point
 
 
 def qout_files_by_point(qout_files):
-    """``{point: path}`` of ``.qout`` files (see ``qout_point``)."""
-    return {qout_point(path): path for path in qout_files}
+    """``{point: path}`` of ``.qout`` files (see ``qout_point``). When two files are for the same point (output of
+    two runs with different base names in one folder), the first by file name is used, for the map and the plot
+    alike, and the other is logged."""
+    by_point = {}
+    for path in sorted(qout_files, key=os.path.basename):
+        point = qout_point(path)
+        if point in by_point:
+            log.warning(
+                f'{os.path.basename(path)} is for the same point as {os.path.basename(by_point[point])}: ignored.'
+            )
+            continue
+        by_point[point] = path
+    return by_point

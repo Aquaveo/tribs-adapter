@@ -493,7 +493,7 @@ def test_create_tribs_czml_layer_fails_for_a_pixel_file_it_cannot_read(tsm, tmp_
     dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_PIXEL, 'simple.pixel')
     (tmp_path / 'simple.pixel').write_text('not a header\n1 2 3\n')
 
-    with pytest.raises(ValueError, match='Could not find the Time_hr column in the header of simple.pixel'):
+    with pytest.raises(ValueError, match='Could not find the NodeID column in the header of simple.pixel'):
         tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
 
     dataset.file_collection_client.add_item.assert_not_called()
@@ -504,6 +504,53 @@ def test_create_tribs_czml_layer_fails_without_an_output_file(tsm, tmp_path, fil
     (tmp_path / 'simple_Outlet.qout').unlink()
 
     with pytest.raises(ValueError, match='No .qout file found in the file collection of dataset ds-1'):
+        tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+
+def _add_qout_file(path, name):
+    shutil.copy(path / 'simple_Outlet.qout', path / name)
+
+
+def test_create_tribs_czml_layer_for_qout_names_interior_points_as_their_files_do(tsm, tmp_path, files_dir):
+    """The plot asks for a point by the name in its entity id, so that is the name of its file. The outlet is node 0
+    of the simple mesh: its interior-node file repeats _Outlet.qout and is left out."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    _add_qout_file(tmp_path, 'simple_3.qout')
+    _add_qout_file(tmp_path, 'simple_0.qout')
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    ids = [entity['id'] for entity in _added(tmp_path, 'ds-1.czml')[1:]]
+    assert ids == ['point_3 [ds-1]', 'point_Outlet [ds-1]']
+    assert _added(tmp_path, meta['variables'][0]['values'])['ids'] == ids
+
+
+def test_create_tribs_czml_layer_for_qout_keeps_the_node_name_of_an_outlet_without_an_outlet_file(
+    tsm, tmp_path, files_dir
+):
+    """Without <base>_Outlet.qout the outlet's point is its node, the name the plot can find its file by."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    (tmp_path / 'simple_Outlet.qout').rename(tmp_path / 'simple_0.qout')
+
+    tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    assert [entity['id'] for entity in _added(tmp_path, 'ds-1.czml')[1:]] == ['point_0 [ds-1]']
+
+
+def test_create_tribs_czml_layer_for_qout_fails_for_a_node_the_mesh_does_not_have(tsm, tmp_path, files_dir):
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    _add_qout_file(tmp_path, 'simple_99.qout')
+
+    with pytest.raises(ValueError, match='simple_99.qout is for node 99, which the mesh does not have'):
+        tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+
+def test_create_tribs_czml_layer_fails_when_no_variable_is_offered(tsm, tmp_path, files_dir):
+    """A qout file with only hidden columns would leave a layer of gray points: fail it instead."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    (tmp_path / 'simple_Outlet.qout').write_text('1-Time,hr\t2-Hlev,m\n0.06\t0.1\n')
+
+    with pytest.raises(ValueError, match='The files of dataset ds-1 hold no variable to show'):
         tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
 
 

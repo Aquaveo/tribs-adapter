@@ -169,6 +169,7 @@ def write_value_layer(czml_dir, frames, time_column, variables, start_date):
     ids = list(frames.keys())
     indexed = {}
     for entity_id, frame in frames.items():
+        frame = frame[np.isfinite(frame[time_column].to_numpy(dtype=float))]  # a row without a time has no place
         frame = frame.drop_duplicates(subset=time_column, keep='last').set_index(time_column).sort_index()
         frame.index = frame.index.astype(float).round(6)
         indexed[entity_id] = frame

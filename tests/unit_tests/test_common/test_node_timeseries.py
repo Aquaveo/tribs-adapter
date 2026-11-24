@@ -115,6 +115,22 @@ def test_pixel_files_by_node_uses_the_node_in_the_file_not_the_file_name(tmp_pat
     assert by_node == {1656: node_1656, 56: node_56}
 
 
+def test_pixel_file_node_reads_only_the_top_of_the_file(tmp_path):
+    """Finding a node's file must not parse every file: a broken row further down is not even looked at."""
+    path = _write(tmp_path / 'salas1656.pixel', PLAIN_PIXEL + 'this row is not data\n')
+
+    assert nts.pixel_file_node(path) == 1656
+
+
+@pytest.mark.parametrize('text, message', [
+    ('NodeID Time_hr Nwt_mm\n', 'bad.pixel has no data rows'),
+    ('NodeID Time_hr Nwt_mm\nabc 1.0 2.0\n', 'Could not read the node ID in the first data row of bad.pixel'),
+], ids=['no rows', 'not a number'])
+def test_pixel_file_node_names_the_file_it_cannot_read(tmp_path, text, message):
+    with pytest.raises(ValueError, match=message):
+        nts.pixel_file_node(_write(tmp_path / 'bad.pixel', text))
+
+
 def test_pixel_files_by_node_needs_the_node_column(tmp_path):
     path = _write(tmp_path / 'salas_Outlet.qout', QOUT)
 
@@ -139,3 +155,28 @@ def test_read_node_file_reads_the_pixel_fixtures(relative_path, rows, columns):
 
     assert frame.shape[1] == columns and (rows is None or len(frame) == rows)
     assert frame['Time_hr'].is_monotonic_increasing
+
+
+def test_qout_files_by_point_uses_the_first_file_by_name_for_a_point_named_twice(caplog):
+    """Output of two runs in one folder: the same file is used every time, and the other one is logged."""
+    files = ['/out/hyd/smallbasin_Outlet.qout', '/out/hyd/examplebasin_Outlet.qout', '/out/hyd/smallbasin_7.qout']
+
+    by_point = nts.qout_files_by_point(files)
+
+    assert by_point == {'Outlet': '/out/hyd/examplebasin_Outlet.qout', '7': '/out/hyd/smallbasin_7.qout'}
+    assert 'smallbasin_Outlet.qout is for the same point as examplebasin_Outlet.qout' in caplog.text
+
+
+@pytest.mark.parametrize('name', ['salas.qout', 'salas_final.qout'])
+def test_qout_point_names_a_file_whose_name_gives_no_node(name):
+    with pytest.raises(ValueError, match=f'Could not tell the node of {name}'):
+        nts.qout_point(f'/out/hyd/{name}')
+
+
+def test_read_basin_file_pairs_units_by_position(tmp_path):
+    """A blank unit cell does not move the units after it onto the wrong column."""
+    text = 'Time\tSrf\tFState\tMAP\t\nhr\tm3/s\t\tmm/hr\t\n1.0\t0.25\t0\t2.5\n'
+
+    _, units = nts.read_basin_file(_write(tmp_path / 'salas0240_00.mrf', text))
+
+    assert units == {'Time': 'hr', 'Srf': 'm3/s', 'FState': None, 'MAP': 'mm/hr'}

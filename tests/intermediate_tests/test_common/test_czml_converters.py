@@ -217,3 +217,15 @@ def test_write_value_layer_names_files_safely_and_reports_a_variable_without_val
     assert (missing['min'], missing['max']) == (None, None)
     assert json.loads((tmp_path / missing['values']).read_text())['values'] == [[None]]
     assert moisture['step_hours'] is None  # a single time
+
+
+def test_write_value_layer_leaves_out_rows_without_a_time(tmp_path):
+    frames = {'point_1 [abc]': _frame([1.0, float('nan'), 2.0], Q=[1.0, 99.0, 3.0])}
+
+    (q,) = czml_converters.write_value_layer(
+        str(tmp_path), frames, 'Time_hr', [dict(name='Q', factor=1.0)], datetime(2004, 6, 1)
+    )
+
+    values = json.loads((tmp_path / q['values']).read_text())
+    assert (values['hours'], values['values']) == ([1.0, 2.0], [[1.0, 3.0]])
+    assert (q['min'], q['max']) == (1.0, 3.0)

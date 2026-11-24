@@ -1081,18 +1081,19 @@ class TribsSpatialManager(ResourceSpatialManager):
                 variables.append(dict(name=column, **describe_variable(variable_kind, base, unit_token=unit_token)))
         elif dataset.dataset_type == DatasetTypes.TRIBS_OUT_QOUT:
             nodes, _, _, _, boundary_codes = get_nodes(node_file, srid)
-            outlet_node = boundary_codes.index(2)  # the outlet is the node with boundary code 2
-            for point, path in sorted(qout_files_by_point(self._dataset_files(dataset, files, '.qout')).items()):
+            if 2 not in boundary_codes:
+                raise ValueError(f'The mesh of dataset {dataset.id} has no outlet node (boundary code 2).')
+            outlet_node = boundary_codes.index(2)
+            files_by_point = qout_files_by_point(self._dataset_files(dataset, files, '.qout'))
+            for point, path in sorted(files_by_point.items()):
                 node_id = outlet_node if point == OUTLET else int(point)
                 if not 0 <= node_id < len(nodes):
                     raise ValueError(f'{os.path.basename(path)} is for node {node_id}, which the mesh does not have.')
-                # The outlet's own interior-node file (<base>_<outlet node>.qout) is the same point as _Outlet.qout
-                label = OUTLET if node_id == outlet_node else point
-                entity_id = f'point_{label} [{dataset_id}]'
-                if entity_id in frames and point != OUTLET:
-                    continue
-                if entity_id not in frames:
-                    entities.append(point_entity(entity_id, nodes[node_id][:2]))
+                if node_id == outlet_node and point != OUTLET and OUTLET in files_by_point:
+                    continue  # the outlet's interior-node file repeats <base>_Outlet.qout
+                # The point is named as its file is, which is also how the plot asks for it
+                entity_id = f'point_{point} [{dataset_id}]'
+                entities.append(point_entity(entity_id, nodes[node_id][:2]))
                 frames[entity_id] = read_node_file(path)
             time_column = NODE_TIME_COLUMN
             columns = [c for c in next(iter(frames.values())).columns if c != time_column]
@@ -1116,6 +1117,8 @@ class TribsSpatialManager(ResourceSpatialManager):
                 for column in visible_variables(variable_kind, columns)
             ]
 
+        if not variables:
+            raise ValueError(f'The files of dataset {dataset.id} hold no variable to show.')
         write_geometry_czml(os.path.join(czml_path, f'{dataset_id}.czml'), dataset.name, entities)
         if not isinstance(start_date, datetime.datetime):
             log.warning(f'Could not parse STARTDATE ({start_date!r}) for dataset {dataset.id}: no time axis.')
