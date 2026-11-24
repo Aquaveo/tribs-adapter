@@ -280,6 +280,28 @@ def tin_output_dataset(project_with_fdb, files_dir):
 
 
 @pytest.fixture(scope="function")
+def time_dynamic_dataset(project_with_fdb, files_dir, scenario_with_input_file):
+    project = project_with_fdb
+    session = object_session(project)
+    model_root = files_dir / "spatial_manager" / "layers"
+    dataset = Dataset.new(
+        name="Test Dataset",
+        description="Test Dataset Description",
+        created_by="_staff",
+        project=project_with_fdb,
+        session=session,
+        dataset_type=DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
+        srid=26913,
+        items=[os.path.join(model_root / "time_dynamic", x) for x in os.listdir(model_root / "time_dynamic")],
+        relative_to=model_root / "time_dynamic",
+    )
+    scenario_with_input_file.link_dataset(dataset, card="Test Card")  # Link the dataset to the scenario
+    yield dataset
+    session.delete(dataset)
+    session.commit()
+
+
+@pytest.fixture(scope="function")
 def time_integrated_dataset(project_with_fdb, files_dir, scenario_with_input_file):
     project = project_with_fdb
     session = object_session(project)

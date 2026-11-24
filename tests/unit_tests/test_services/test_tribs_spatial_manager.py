@@ -181,29 +181,29 @@ def test_build_gltf_variables_without_value_range():
 
 
 def test_build_gltf_variables_from_mesh_output(files_dir, tmp_path):
-    """End to end over the tin fixture: five time-dynamic files, 10 hours apart."""
+    """End to end over the tin fixture: five time-dynamic files, 10 hours apart (ET changes in every one)."""
     from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
 
     layers_dir = files_dir / 'spatial_manager' / 'layers' / 'tin'
     output_files = sorted(str(p) for p in (layers_dir / 'output').glob('salas.*_00d'))
     assert len(output_files) == 5
     tmv = tRIBSMeshViz(mesh_basename=layers_dir / 'salas', mesh_epsg=32613, output_files=output_files)
-    meta = tmv.to_gltf(str(tmp_path / 'abc-salas'), output_variables=['S'], generate_legend=True)
+    meta = tmv.to_gltf(str(tmp_path / 'abc-salas'), output_variables=['ET'], generate_legend=True)
 
     variables = TribsSpatialManager._build_gltf_variables(
         meta['files'], URL_DIR, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=168
     )
     assert len(variables) == 1
-    s = variables[0]
-    assert s['name'] == 'S'
-    assert [t['hours'] for t in s['timesteps']] == [0, 10, 20, 30, 40]
-    assert s['step_hours'] == 10
-    assert s['start'] == '2004-06-01T00:00:00Z'
-    assert s['end'] == '2004-06-02T16:00:00Z'
-    assert s['timesteps'][0]['url'] == 'fdb/fc/gltf/abc-salas_salas-0000_00d_S.glb'
+    et = variables[0]
+    assert et['name'] == 'ET'
+    assert [t['hours'] for t in et['timesteps']] == [0, 10, 20, 30, 40]
+    assert et['step_hours'] == 10
+    assert et['start'] == '2004-06-01T00:00:00Z'
+    assert et['end'] == '2004-06-02T16:00:00Z'
+    assert et['timesteps'][0]['url'] == 'fdb/fc/gltf/abc-salas_salas-0000_00d_ET.glb'
     # One legend per variable, scaled over all time steps and shared by every time step
-    assert all(t['legend'] == 'fdb/fc/gltf/abc-salas_S_legend.png' for t in s['timesteps'])
-    assert all(os.path.exists(tmp_path / os.path.basename(t['url'])) for t in s['timesteps'])
+    assert all(t['legend'] == 'fdb/fc/gltf/abc-salas_ET_legend.png' for t in et['timesteps'])
+    assert all(os.path.exists(tmp_path / os.path.basename(t['url'])) for t in et['timesteps'])
 
 
 # --- create_layer_for_dataset: glTF output datasets -----------------------------------------------------------------
@@ -244,7 +244,7 @@ def _session_with_node_file_dataset():
 
 
 def _gltf_meta(*entries):
-    return dict(gltfs=[], origin=[-105.0, 40.0, 1500.0], extents=[-105.1, 39.9, -104.9, 40.1], files=list(entries))
+    return dict(origin=[-105.0, 40.0, 1500.0], extents=[-105.1, 39.9, -104.9, 40.1], files=list(entries))
 
 
 def _patch_tin_layer_writer(mocker, *entries):
@@ -312,17 +312,18 @@ def test_create_layer_for_time_integrated_dataset_without_a_parsed_startdate(tsm
     session.commit.assert_called_once()
 
 
-def test_create_layer_for_legacy_time_dynamic_dataset_has_no_variable_table(tsm, tmp_path, mocker):
+def test_create_layer_for_time_dynamic_dataset_uses_the_dynamic_variable_table(tsm, tmp_path, mocker):
     dataset = _output_dataset(tmp_path, dataset_type=DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
                               start_date=datetime.datetime(2004, 6, 1))
     session, node_file_dataset = _session_with_node_file_dataset()
-    create = _patch_tin_layer_writer(mocker, _file_entry('Nwt', 0, kind='d'))
+    create = _patch_tin_layer_writer(mocker, _file_entry('Nwt', 0, kind='d'), _file_entry('VegFraction', 0, kind='d'))
 
     tsm.create_layer_for_dataset(dataset, 26913, session)
 
-    create.assert_called_once_with(node_file_dataset, mesh_epsg=26913, output_dataset=dataset, variable_kind=None)
-    (nwt,) = _viz_set_on(dataset)['variables']
-    assert (nwt['name'], nwt['label'], nwt['units'], nwt['tier']) == ('Nwt', 'Nwt', None, None)
+    create.assert_called_once_with(node_file_dataset, mesh_epsg=26913, output_dataset=dataset, variable_kind='dynamic')
+    nwt, veg = _viz_set_on(dataset)['variables']
+    assert (nwt['name'], nwt['label'], nwt['units'], nwt['tier']) == ('Nwt', 'Depth to Groundwater', 'm', 'priority')
+    assert (veg['label'], veg['units'], veg['tier']) == ('Vegetation Fraction', '%', 'secondary')
 
 
 def test_create_layer_for_output_dataset_requires_a_linked_realization(tsm, tmp_path, mocker):

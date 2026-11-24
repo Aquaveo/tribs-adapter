@@ -17,7 +17,9 @@ EXAMPLEBASIN_MRF = (
 
 
 def test_tables_cover_the_sheet():
-    assert {kind: len(rows) for kind, rows in ov.OUTPUT_VARIABLES.items()} == {'qout': 3, 'mrf': 32, 'integrated': 75}
+    assert {kind: len(rows) for kind, rows in ov.OUTPUT_VARIABLES.items()} == {
+        'qout': 3, 'mrf': 32, 'integrated': 75, 'dynamic': 52
+    }
 
 
 @pytest.mark.parametrize('kind', list(ov.OUTPUT_VARIABLES))
@@ -34,6 +36,7 @@ def test_table_rows_are_well_formed(kind):
     (DatasetTypes.TRIBS_OUT_QOUT, ov.QOUT),
     (DatasetTypes.TRIBS_OUT_MRF, ov.MRF),
     (DatasetTypes.TRIBS_OUT_TIME_INTEGRATED, ov.INTEGRATED),
+    (DatasetTypes.TRIBS_OUT_TIME_DYNAMIC, ov.DYNAMIC),
     (DatasetTypes.TRIBS_OUT_STATIONS, None),
     (DatasetTypes.TRIBS_OUT_PIXEL, None),
     (DatasetTypes.TRIBS_OUT_RFT, None),
@@ -180,3 +183,48 @@ def test_every_integrated_fixture_column_is_in_the_table(relative_path):
     assert unknown == [], f'{relative_path}: {unknown}'
     offered = ov.visible_variables('integrated', names)
     assert offered[0] == 'Z' and 'BndCd' not in offered and 'ID' not in offered
+
+
+# The v5.3.1 header, as listed in the sheet
+DYNAMIC_V531 = (
+    'ID Nwt Mu Mi Nf Nt Qpout Qpin Srf Rain ST IWE LWE SnSub SnEvap SnMelt Upack sLHF sSHF sGHF sPHF sRLo sRLi sRSi '
+    'Uerr IntSWE IntSub IntUnl SoilMoist RootMoist CanStorage ActEvp EvpSoil ET GFlux HFlux LFlux Qstrm Hlev FlwVlc '
+    'CanStorParam IntercepCoeff ThroughFall CanFieldCap DrainCoeff DrainExpPar LandUseAlb VegHeight OptTransmCoeff '
+    'StomRes VegFraction LeafAI'
+).split()
+
+
+def test_dynamic_table_offers_the_sheet_priorities_in_file_order():
+    assert [row.name for row in ov.OUTPUT_VARIABLES['dynamic']] == DYNAMIC_V531
+    assert ov.visible_variables('dynamic', DYNAMIC_V531) == [
+        # priority
+        'Nwt', 'Rain', 'IWE', 'LWE', 'SnSub', 'SnEvap', 'IntSub', 'SoilMoist', 'RootMoist', 'EvpSoil', 'ET',
+        # secondary
+        'Srf', 'SnMelt', 'GFlux', 'HFlux', 'LFlux', 'Qstrm', 'VegFraction', 'LeafAI',
+    ]
+
+
+@pytest.mark.parametrize('name, label, units, factor', [
+    ('Nwt', 'Depth to Groundwater', 'm', 0.001),
+    ('IWE', 'Snowpack Ice', 'mm', 10.0),
+    ('SnSub', 'Snowpack Sublimation', 'mm', -10.0),
+    ('RootMoist', 'Root-Zone Soil Moisture', '% saturation', 100.0),
+    ('Qstrm', 'Streamflow', 'm³/s', 1.0),
+])
+def test_dynamic_variables_are_described_in_display_units(name, label, units, factor):
+    info = ov.describe('dynamic', name)
+    assert (info['label'], info['units'], info['factor']) == (label, units, factor)
+
+
+@pytest.mark.parametrize('relative_path, unknown', [
+    # Builds other than v5.3.1 also write node attributes and a few snow columns the sheet does not list
+    ('spatial_manager/layers/time_dynamic/examplebasin.0000_00d', ['Z', 'S', 'CAr', 'SWE', 'DU', 'SoilID', 'LUseID']),
+    ('datasets/voronoi/salas.0000_00d', ['Z', 'S', 'CAr', 'SoilID', 'LUseID']),  # CanStorg is an alias
+])
+def test_dynamic_fixture_columns_outside_the_sheet_stay_visible(relative_path, unknown):
+    with open(FILES / relative_path) as f:
+        names = [c.strip() for c in next(csv.reader(f)) if c.strip()]
+    assert [n for n in names if ov.lookup('dynamic', n) is None] == unknown
+    offered = ov.visible_variables('dynamic', names)
+    assert offered[0] == 'Nwt' and 'ID' not in offered and 'Mu' not in offered
+    assert offered[-len(unknown):] == unknown  # after the sheet's variables, under their own names

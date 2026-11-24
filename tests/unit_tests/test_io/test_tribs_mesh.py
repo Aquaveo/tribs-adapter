@@ -400,6 +400,45 @@ def test_interpolate_array_without_values(tmv_factory):
     assert tmv._interpolate_array([1.0, 3.0, None], value_range=(0.0, None)) == [0.0, 1.0, None]
 
 
+def test_a_variable_that_never_changes_is_written_once(tmv_factory, tmp_path):
+    """A variable whose cells keep their values in every output file gets one glTF, that of the earliest time step,
+    which every one of its time steps names; variables that change (or that only one file has) get one per file."""
+    output_dir = tmp_path / 'output'
+    output_dir.mkdir()
+    # Given out of time order: the earliest file is the one the unchanging variable is written for
+    files = {
+        'steady.0020_00d': "ID,Steady,Moving,Late\n0,5,3,7\n1,6,3,7\n",
+        'steady.0030_00d': "ID,Moving\n0,4\n1,4\n",  # Steady is not in this one
+        'steady.0000_00d': "ID,Steady,Moving\n0,5,1\n1,6,1\n",
+        'steady.0010_00d': "ID,Steady,Moving\n0,5,1\n1,6,2\n",
+    }
+    for name, text in files.items():
+        (output_dir / name).write_text(text)
+    tmv = tmv_factory('salas_outputs', '32613')
+    tmv.output_files = [str(output_dir / name) for name in files]
+
+    assert tmv._unchanging_variables() == {'Steady'}
+    assert tmv._unchanging_variables(['Moving', 'Missing']) == set()
+
+    base = os.path.join(tmp_path, 'steady')
+    meta = tmv.to_gltf(base, '32613', generate_legend=True)
+    written = [(f['variable'], f['hours'], os.path.basename(f['gltf'])) for f in meta['files']]
+    # Every variable keeps an entry per time step, in time order
+    assert written == [
+        ('Steady', 0, 'steady_steady-0000_00d_Steady.glb'),
+        ('Moving', 0, 'steady_steady-0000_00d_Moving.glb'),
+        ('Steady', 10, 'steady_steady-0000_00d_Steady.glb'),
+        ('Moving', 10, 'steady_steady-0010_00d_Moving.glb'),
+        ('Steady', 20, 'steady_steady-0000_00d_Steady.glb'),
+        ('Moving', 20, 'steady_steady-0020_00d_Moving.glb'),
+        ('Late', 20, 'steady_steady-0020_00d_Late.glb'),
+        ('Moving', 30, 'steady_steady-0030_00d_Moving.glb'),
+    ]
+    assert sorted(f for f in os.listdir(tmp_path) if f.endswith('.glb')) == sorted({name for _, _, name in written})
+    steady = [f for f in meta['files'] if f['variable'] == 'Steady']
+    assert {(f['min'], f['max'], f['legend']) for f in steady} == {(5.0, 6.0, f'{base}_Steady_legend.png')}
+
+
 def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory, tmp_path):
     """A variable's colors and legend span its range over every output file, not the range of each file."""
     output_dir = str(tmp_path / 'output')
@@ -689,7 +728,7 @@ def test_bare_mesh_renders_voronoi_cells_by_elevation(tmv_factory, tmp_path):
     meta = tmv.to_gltf(base, '32613', generate_legend=True)
     glb_file = f'{base}.glb'
     assert os.path.exists(glb_file) and os.path.exists(f'{base}_legend.png')
-    assert len(meta['gltfs']) == 1
+    assert len(meta['files']) == 1 and 'gltfs' not in meta
 
     triangles, positions, _, texcoords = _read_gltf_accessors(glb_file)
     geometry = tmv._build_voronoi_geometry()
@@ -762,7 +801,7 @@ def test_voronoi_cells_clipped_to_mesh(tmp_path):
     geometry = tmv._build_voronoi_geometry()
     assert geometry['positions'][:, 1].min() >= -1.0 - 1e-6
     out = tmv.to_gltf(os.path.join(tmp_path, 'fan'), 32613)
-    assert len(out['gltfs']) == 1
+    assert len(out['files']) == 1
 
 
 def test_clipping_leaves_interior_cells_untouched(tmv_factory):

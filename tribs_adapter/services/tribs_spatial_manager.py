@@ -319,7 +319,7 @@ class TribsSpatialManager(ResourceSpatialManager):
             output_node_file = linked_realization.input_file.files_and_pathnames.mesh_generation.INPUTDATAFILE
             node_file_dataset = session.query(Dataset).get(str(output_node_file.resource_id))
             # The variable table (friendly labels, display units, priority tiers) for this kind of output file, if
-            # the sheet covers it (integrated _i output; legacy time-dynamic _d datasets have no table).
+            # the sheet covers it (integrated _i and time-dynamic _d output).
             variable_kind = kind_for_dataset_type(dataset.dataset_type)
             gltf_meta = self.create_tribs_tin_layer(
                 node_file_dataset, mesh_epsg=srid, output_dataset=dataset, variable_kind=variable_kind
