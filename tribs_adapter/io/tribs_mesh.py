@@ -691,6 +691,26 @@ class tRIBSMeshViz:
                 ranges[variable] = (low, high)
         return ranges
 
+    def add_derived_variable(self, name: str, terms: list) -> bool:
+        """Add a variable computed from other columns: the sum of ``value * factor`` over ``terms``.
+
+        Args:
+            name: Name of the new variable. An output file that already has a column of that name keeps it.
+            terms: ``[(column, factor), ...]``.
+
+        Returns:
+            Whether any output file got the variable. Only files that hold every column of ``terms`` do.
+        """
+        added = False
+        for output_file in self.output_files:
+            file_data = self.data[output_file]
+            if name in file_data or not terms or any(column not in file_data for column, _ in terms):
+                continue
+            file_data[name] = sum(np.asarray(file_data[column], dtype=np.float64) * factor for column, factor in terms)
+            self._cell_values_cache.pop((str(output_file), name), None)  # a lookup made before the column existed
+            added = True
+        return added
+
     def _output_files_in_time_order(self) -> list:
         """The output files sorted by the time stamp in their names; files without one come last, in the order given."""
         def time_order(indexed_file):

@@ -218,7 +218,7 @@ def tsm():
 
 
 def _output_dataset(path, dataset_type=DatasetTypes.TRIBS_OUT_TIME_INTEGRATED, start_date=None, spopintrvl=6,
-                    linked=True):
+                    linked=True, metstep=60.0):
     dataset = mock.MagicMock()
     dataset.id = 'ds-1'
     dataset.dataset_type = dataset_type
@@ -232,6 +232,7 @@ def _output_dataset(path, dataset_type=DatasetTypes.TRIBS_OUT_TIME_INTEGRATED, s
         realization.input_file.files_and_pathnames.mesh_generation.INPUTDATAFILE.resource_id = 'node-ds'
         realization.input_file.run_parameters.time_variables.STARTDATE = start_date
         realization.input_file.run_parameters.time_variables.SPOPINTRVL = spopintrvl
+        realization.input_file.run_parameters.time_variables.METSTEP = metstep
         dataset.linked_realizations = [realization]
     return dataset
 
@@ -252,7 +253,8 @@ def _patch_tin_layer_writer(mocker, *entries):
     dataset's ``gltf`` directory, as the real writer does, and returns that metadata."""
     meta = _gltf_meta(*entries)
 
-    def write(node_file_dataset, mesh_epsg, output_dataset=None, output_variables=None, variable_kind=None):
+    def write(node_file_dataset, mesh_epsg, output_dataset=None, output_variables=None, variable_kind=None,
+              met_step_hours=1.0):
         gltf_dir = os.path.join(output_dataset.file_collection_client.path, 'gltf')
         os.makedirs(gltf_dir, exist_ok=True)
         for entry in meta['files']:
@@ -281,7 +283,7 @@ def test_create_layer_for_time_integrated_dataset_wires_the_realization_into_the
     # The mesh comes from the realization's INPUTDATAFILE dataset and the output is rendered with the integrated table
     session.query.return_value.get.assert_called_once_with('node-ds')
     create.assert_called_once_with(
-        node_file_dataset, mesh_epsg=26913, output_dataset=dataset, variable_kind='integrated'
+        node_file_dataset, mesh_epsg=26913, output_dataset=dataset, variable_kind='integrated', met_step_hours=1.0
     )
     viz = _viz_set_on(dataset)
     assert viz['type'] == 'gltf'
@@ -314,13 +316,16 @@ def test_create_layer_for_time_integrated_dataset_without_a_parsed_startdate(tsm
 
 def test_create_layer_for_time_dynamic_dataset_uses_the_dynamic_variable_table(tsm, tmp_path, mocker):
     dataset = _output_dataset(tmp_path, dataset_type=DatasetTypes.TRIBS_OUT_TIME_DYNAMIC,
-                              start_date=datetime.datetime(2004, 6, 1))
+                              start_date=datetime.datetime(2004, 6, 1), metstep=30.0)
     session, node_file_dataset = _session_with_node_file_dataset()
     create = _patch_tin_layer_writer(mocker, _file_entry('Nwt', 0, kind='d'), _file_entry('VegFraction', 0, kind='d'))
 
     tsm.create_layer_for_dataset(dataset, 26913, session)
 
-    create.assert_called_once_with(node_file_dataset, mesh_epsg=26913, output_dataset=dataset, variable_kind='dynamic')
+    # METSTEP is in minutes; the writer gets it in hours for the derived variables
+    create.assert_called_once_with(
+        node_file_dataset, mesh_epsg=26913, output_dataset=dataset, variable_kind='dynamic', met_step_hours=0.5
+    )
     nwt, veg = _viz_set_on(dataset)['variables']
     assert (nwt['name'], nwt['label'], nwt['units'], nwt['tier']) == ('Nwt', 'Depth to Groundwater', 'm', 'priority')
     assert (veg['label'], veg['units'], veg['tier']) == ('Vegetation Fraction', '%', 'secondary')

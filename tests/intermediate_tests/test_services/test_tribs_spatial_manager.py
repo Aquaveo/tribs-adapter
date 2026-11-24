@@ -163,21 +163,43 @@ def test_create_time_integrated_layer_offers_only_sheet_variables(tsm, time_inte
     tsm.delete_tribs_tin_layer(time_integrated_dataset)
 
 
+def test_create_time_dynamic_layer_scales_snow_losses_by_the_met_time_step(
+    tsm, time_dynamic_dataset, node_file_dataset, mocker
+):
+    """The snow losses in total ET are depths per met time step: with a half-hour step they count double per hour."""
+    from tribs_adapter.io.tribs_mesh import tRIBSMeshViz
+    add = mocker.spy(tRIBSMeshViz, 'add_derived_variable')
+
+    tsm.create_tribs_tin_layer(
+        node_file_dataset, 32613, time_dynamic_dataset, output_variables=['TotalET'], variable_kind='dynamic',
+        met_step_hours=0.5,
+    )
+
+    terms = {call.args[1]: call.args[2] for call in add.call_args_list}
+    assert terms['TotalET'] == [('ET', 1.0), ('SnSub', -20.0), ('SnEvap', -20.0), ('IntSub', -20.0)]
+    assert terms['SnowWE'] == [('IWE', 10.0), ('LWE', 10.0)]
+    tsm.delete_tribs_tin_layer(time_dynamic_dataset)
+
+
 def test_create_time_dynamic_layer_offers_only_sheet_variables(tsm, time_dynamic_dataset, node_file_dataset):
     """With the dynamic variable table the priority and secondary variables are rendered, then the columns the sheet
-    does not list; a variable that is the same in both time steps is written once and shared by them."""
-    meta = tsm.create_tribs_tin_layer(node_file_dataset, 32613, time_dynamic_dataset, variable_kind='dynamic')
+    does not list. Snow water equivalent and total ET are computed from their columns, which are then not rendered
+    by themselves. A variable that is the same in both time steps is written once and shared by them."""
+    meta = tsm.create_tribs_tin_layer(
+        node_file_dataset, 32613, time_dynamic_dataset, variable_kind='dynamic', met_step_hours=1.0
+    )
     dataset_path = time_dynamic_dataset.file_collection_client.path
     gltf_files = os.listdir(os.path.join(dataset_path, 'gltf'))
     written = [f['variable'] for f in meta['files']]
-    # 25 variables. SoilID and LUseID are only in the first file; the other 23 have an entry per time step, and
+    # 21 variables. SoilID and LUseID are only in the first file; the other 19 have an entry per time step, and
     # those that do not change between the 2 time steps share one glTF file.
-    assert len(written) == 23 * 2 + 2
+    assert len(written) == 19 * 2 + 2
     distinct_files = {os.path.basename(f['gltf']) for f in meta['files']}
     assert sorted(f for f in gltf_files if f.endswith('.glb')) == sorted(distinct_files)
-    assert 25 < len(distinct_files) < len(written)
-    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 25
+    assert 21 < len(distinct_files) < len(written)
+    assert len([f for f in gltf_files if f.endswith('_legend.png')]) == 21
     assert not {'ID', 'Mu', 'Mi', 'Upack', 'StomRes'} & set(written)  # index, hidden and ignored columns
+    assert not {'IWE', 'LWE', 'SnSub', 'SnEvap', 'IntSub', 'ET'} & set(written)  # shown combined instead
 
     viz = tsm._build_gltf_viz(
         time_dynamic_dataset, meta, start_date=datetime.datetime(2004, 6, 1), fallback_step_hours=10,
@@ -186,20 +208,24 @@ def test_create_time_dynamic_layer_offers_only_sheet_variables(tsm, time_dynamic
     names = [v['name'] for v in viz['variables']]
     # This build has no SnMelt column and writes VegFraction padded with spaces in the header
     assert names == [
-        'Nwt', 'Rain', 'IWE', 'LWE', 'SnSub', 'SnEvap', 'IntSub', 'SoilMoist', 'RootMoist', 'EvpSoil', 'ET',
+        'Nwt', 'Rain', 'SnowWE', 'SoilMoist', 'RootMoist', 'EvpSoil', 'TotalET',
         'Srf', 'GFlux', 'HFlux', 'LFlux', 'Qstrm', 'VegFraction', 'LeafAI',
         'Z', 'S', 'CAr', 'SWE', 'DU', 'SoilID', 'LUseID',
     ]
-    assert [v['tier'] for v in viz['variables']] == ['priority'] * 11 + ['secondary'] * 7 + [None] * 7
+    assert [v['tier'] for v in viz['variables']] == ['priority'] * 7 + ['secondary'] * 7 + [None] * 7
     variables = {v['name']: v for v in viz['variables']}
     nwt = variables['Nwt']
     assert (nwt['label'], nwt['units'], nwt['factor']) == ('Depth to Groundwater', 'm', 0.001)
+    snow_we, total_et = variables['SnowWE'], variables['TotalET']
+    assert (snow_we['label'], snow_we['units'], snow_we['factor']) == ('Snow Water Equivalent', 'mm', 1.0)
+    assert (total_et['label'], total_et['units'], total_et['factor']) == ('Evapotranspiration', 'mm/hr', 1.0)
+    assert total_et['min'] <= total_et['max'] and total_et['description']
     steps = {name: [t['hours'] for t in v['timesteps']] for name, v in variables.items()}
     assert steps.pop('SoilID') == [0] and steps.pop('LUseID') == [0]
     assert set(map(tuple, steps.values())) == {(0, 10)}
     urls = {name: [t['url'] for t in v['timesteps']] for name, v in variables.items()}
     assert urls['VegFraction'][0] == urls['VegFraction'][1]  # never changes: one file for both time steps
-    assert urls['ET'][0] != urls['ET'][1]
+    assert urls['TotalET'][0] != urls['TotalET'][1]
     json.dumps(viz)
 
     tsm.delete_tribs_tin_layer(time_dynamic_dataset)

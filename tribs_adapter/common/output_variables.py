@@ -34,6 +34,29 @@ class OutputVariable:
     aliases: tuple = ()  # other column names used for this variable in real files
 
 
+@dataclass(frozen=True)
+class DerivedVariable:
+    """A variable that is not a column of the file but the sum of some of its columns, each times a factor.
+
+    The factors convert to display units, so the result has ``factor`` 1. A term marked ``per_met_step`` is a depth
+    accumulated over one meteorological time step (METSTEP); its factor gives the depth per hour for a step of one
+    hour and is divided by the length of the step in hours (see ``derived_terms``).
+    """
+    name: str  # layer name; never the name of a column tRIBS writes
+    label: str
+    display_units: str | None
+    tier: Tier
+    description: str
+    terms: tuple  # ((column, factor, per_met_step), ...)
+    factor: float = 1.0
+    aliases: tuple = ()
+
+    @property
+    def sources(self):
+        """The columns the variable is computed from. They are not offered by themselves when it is."""
+        return tuple(column for column, _, _ in self.terms)
+
+
 QOUT = 'qout'
 MRF = 'mrf'
 INTEGRATED = 'integrated'
@@ -672,6 +695,33 @@ OUTPUT_VARIABLES = {
     ),
 }
 
+# Variables the dynamic sheet asks to be shown combined rather than column by column.
+DERIVED_VARIABLES = {
+    DYNAMIC: (
+        DerivedVariable(
+            'SnowWE',
+            'Snow Water Equivalent',
+            'mm',
+            Tier.PRIORITY,
+            'Snow water equivalent of the snowpack: its ice plus its liquid water (IWE + LWE).',
+            terms=(('IWE', 10.0, False), ('LWE', 10.0, False)),
+        ),
+        DerivedVariable(
+            'TotalET',
+            'Evapotranspiration',
+            'mm/hr',
+            Tier.PRIORITY,
+            (
+                'Total evapotranspiration rate including the snow losses: wet canopy evaporation, transpiration and '
+                'soil evaporation (ET) plus snowpack sublimation, snowpack evaporation and canopy snow sublimation '
+                '(SnSub, SnEvap and IntSub over the last met time step).'
+            ),
+            # The snow losses are written as negative centimetres per met time step
+            terms=(('ET', 1.0, False), ('SnSub', -10.0, True), ('SnEvap', -10.0, True), ('IntSub', -10.0, True)),
+        ),
+    ),
+}
+
 _INDEX = {
     kind: {
         alias: variable
@@ -680,6 +730,8 @@ _INDEX = {
     }
     for kind, variables in OUTPUT_VARIABLES.items()
 }
+for _kind, _derived in DERIVED_VARIABLES.items():
+    _INDEX[_kind].update({variable.name: variable for variable in _derived})
 
 _TIER_ORDER = {Tier.PRIORITY: 0, Tier.SECONDARY: 1}
 _OFFERED_TIERS = (Tier.PRIORITY, Tier.SECONDARY)
@@ -691,10 +743,27 @@ def kind_for_dataset_type(dataset_type):
 
 
 def lookup(kind, name):
-    """The ``OutputVariable`` called ``name`` (or aliased to it) in the table ``kind``; None when unknown."""
+    """The ``OutputVariable`` (or ``DerivedVariable``) called ``name`` (or aliased to it) in the table ``kind``; None
+    when unknown."""
     if kind is None or name is None:
         return None
     return _INDEX.get(kind, {}).get(name)
+
+
+def derived_variables(kind, columns):
+    """The derived variables of the table ``kind`` that can be computed from ``columns``: those whose source columns
+    are all there. Without a table, or when a source is missing, there are none (the columns are then offered by
+    themselves)."""
+    columns = set(columns)
+    return [variable for variable in DERIVED_VARIABLES.get(kind, ()) if columns.issuperset(variable.sources)]
+
+
+def derived_terms(variable, met_step_hours=1.0):
+    """The ``(column, factor)`` pairs a derived variable is the sum of, for a meteorological time step of
+    ``met_step_hours`` (METSTEP in hours; anything but a positive number counts as one hour)."""
+    valid = isinstance(met_step_hours, (int, float)) and not isinstance(met_step_hours, bool) and met_step_hours > 0
+    hours = float(met_step_hours) if valid else 1.0
+    return [(column, factor / hours if per_met_step else factor) for column, factor, per_met_step in variable.terms]
 
 
 def split_unit_suffix(layer_name):
@@ -731,18 +800,26 @@ def describe(kind, name, unit_token=None, file_units=None):
 
 def visible_variables(kind, names):
     """The variables of ``names`` to offer, in display order: PRIORITY, then SECONDARY, then variables the table does
-    not know, keeping the file order within each group. INDEX, HIDE and IGNORE variables are left out. Without a
-    table (``kind`` None) every name is kept as is."""
+    not know, keeping the file order within each group. INDEX, HIDE and IGNORE variables are left out, and so are
+    the source columns of a derived variable that is in ``names``; the derived variable takes the place of the
+    column of its first term. Without a table (``kind`` None) every name is kept as is."""
     names = list(names)
     if kind is None:
         return names
+    position_of = {name: position for position, name in enumerate(names)}
+    derived = [variable for variable in DERIVED_VARIABLES.get(kind, ()) if variable.name in position_of]
+    superseded = {source for variable in derived for source in variable.sources}
+    for variable in derived:
+        position_of[variable.name] = position_of.get(variable.sources[0], position_of[variable.name])
     kept = []
-    for position, name in enumerate(names):
+    for name in names:
+        if name in superseded:
+            continue
         variable = lookup(kind, name)
         if variable is None:
-            kept.append((2, position, name))
+            kept.append((2, position_of[name], name))
         elif variable.tier in _OFFERED_TIERS:
-            kept.append((_TIER_ORDER[variable.tier], position, name))
+            kept.append((_TIER_ORDER[variable.tier], position_of[name], name))
     return [name for _, _, name in sorted(kept)]
 
 

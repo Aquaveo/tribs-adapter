@@ -439,6 +439,29 @@ def test_a_variable_that_never_changes_is_written_once(tmv_factory, tmp_path):
     assert {(f['min'], f['max'], f['legend']) for f in steady} == {(5.0, 6.0, f'{base}_Steady_legend.png')}
 
 
+def test_add_derived_variable_sums_columns_times_factors(tmv_factory, tmp_path):
+    """A derived variable is added to the files that have all of its columns and is rendered like any other."""
+    output_dir = tmp_path / 'output'
+    output_dir.mkdir()
+    (output_dir / 'sum.0000_00d').write_text("ID,Ice,Liquid\n0,1,0.5\n1,2,0\n")
+    (output_dir / 'sum.0010_00d').write_text("ID,Ice\n0,3\n1,4\n")  # no Liquid column
+    (output_dir / 'sum.0020_00d').write_text("ID,Ice,Liquid,Water\n0,1,1,99\n1,1,1,98\n")  # has a Water column
+    tmv = tmv_factory('salas_outputs', '32613')
+    first, second, third = tmv.output_files = [str(output_dir / f'sum.00{h}0_00d') for h in (0, 1, 2)]
+
+    assert tmv.add_derived_variable('Water', [('Ice', 10.0), ('Liquid', -10.0)]) is True
+    np.testing.assert_allclose(tmv.data[first]['Water'], [5.0, 20.0])
+    assert 'Water' not in tmv.data[second]
+    np.testing.assert_allclose(tmv.data[third]['Water'], [99.0, 98.0])  # the file's own column is kept
+    assert tmv.add_derived_variable('Nothing', [('Ice', 1.0), ('Missing', 1.0)]) is False
+    assert tmv.add_derived_variable('Empty', []) is False
+
+    meta = tmv.to_gltf(os.path.join(tmp_path, 'sum'), '32613', output_variables=['Water'])
+    assert [(f['variable'], f['hours'], f['min'], f['max']) for f in meta['files']] == [
+        ('Water', 0, 5.0, 99.0), ('Water', 20, 5.0, 99.0)
+    ]
+
+
 def test_output_variable_colors_scaled_over_all_time_steps(tmv_factory, tmp_path):
     """A variable's colors and legend span its range over every output file, not the range of each file."""
     output_dir = str(tmp_path / 'output')
