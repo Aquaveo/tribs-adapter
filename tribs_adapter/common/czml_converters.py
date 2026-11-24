@@ -1,39 +1,22 @@
+import datetime
+import json
+import math
 import numpy as np
 import os
-import pandas as pd
 from pyproj import Transformer, CRS
 import re
 
 from tribs_adapter.common.czml_generator import CZMLGenerator
+from tribs_adapter.common.output_variables import scale_range
 
-
-def get_file_variables(var_file, skip_cols=2):
-    """Get the variables from a file."""
-    with open(var_file, 'r') as f:
-        _data = f.readlines()
-        header = _data[0]
-        headers = [x.strip().replace(',', '_').replace('/', '-') for x in re.split(r'\s*\d+-', header)[1:]]
-    return headers[skip_cols:]
-
-
-def get_output_file_variables(output_file):
-    """Get the variables from an output file."""
-    with open(output_file, 'r') as f:
-        _data = f.readlines()
-        header = _data[0]
-        headers = [x.strip().replace(',', '_').replace('/', '-') for x in re.split(r'\t', header)[1:] if x != '']
-    return headers
-
-
-def get_output_file_units(output_file):
-    """The units of each variable of an mrf/rft file, from its second line: ``{'Srf': 'm3/s', 'FState': None, ...}``.
-    ``[]`` (no units) becomes None. Variables without an entry on the units line are left out."""
-    with open(output_file, 'r') as f:
-        header = f.readline()
-        units_line = f.readline()
-    names = [x.strip() for x in header.split('\t') if x.strip()]
-    units = [x.strip() for x in units_line.split('\t') if x.strip()]
-    return {name: (None if unit in ('[]', '[-]', '-') else unit) for name, unit in zip(names, units)}
+# Folder (inside a dataset's ``czml`` folder) of the per-variable values files of a value layer
+VALUES_DIR = 'values'
+# A layer plays through in at most about this many clock steps, so output written every few minutes (qout) does
+# not take many minutes to play. The values keep their own time step.
+MAX_CLOCK_STEPS = 500
+# Color of a feature before the browser has colored it by value (and of a value that is missing)
+NO_VALUE_RGBA = [160, 160, 160, 255]
+POLYGON_ALPHA = 175
 
 
 def get_origin(nodes):
@@ -89,157 +72,137 @@ def get_nodes(nodes_file, srid, flatten_extents=False):
     return nodes, extent, origin, boundary_nodes, ids
 
 
-def generate_czml_for_pixel_files(
-    nodes_file,
-    pixel_files,
-    start_date,
-    run_time,
-    interval,
-    path_to_write,
-    dataset_id=None,
-    variable=None,
-    srid=32612,
-    legend_title=None,
-    legend_factor=1.0,
-):
-    """Generate CZML for pixel files."""
-    # Read the nodes file
-    nodes, _, _, _, _ = get_nodes(nodes_file, srid)
-
-    # Get Variables and Data
-    data = {}
-    for _f in pixel_files:
-        with open(_f, 'r') as f:
-            _data = f.readlines()
-            header, _data = _data[0], _data[1:]
-            headers = [x.strip().replace(',', '_').replace('/', '-') for x in re.split(r'\s*\d+-', header)[1:]]
-            _data = [tuple(map(float, d.strip().split())) for d in _data]
-            point_id = int(_data[0][0])
-            df = pd.DataFrame(_data, columns=headers)
-            data[point_id] = df
-
-    # Create Generator
-    czml_gen = CZMLGenerator("Pixel Files")
-    # Iterate through points and add them to the generator
-    for point_id, df in data.items():
-        loc = nodes[point_id][:2]
-        dataset_id_string = f" [{dataset_id}]" if dataset_id else ""
-        czml_gen.add_point(
-            point=loc,
-            data_values=df[variable].values,
-            id=f"point_{point_id}{dataset_id_string}",
-            start_time=start_date,
-            run_time=run_time,
-            interval=interval
-        )
-
-    # Get the CZML
-    czml_gen.write_czml(path_to_write, legend=True, legend_title=legend_title, legend_factor=legend_factor)
+def point_entity(entity_id, location):
+    """A point feature of a value layer: ``location`` is ``(longitude, latitude)`` in degrees."""
+    return dict(id=entity_id, kind='point', positions=[float(location[0]), float(location[1])])
 
 
-def generate_czml_for_qout_files(
-    nodes_file,
-    output_files,
-    start_date,
-    run_time,
-    interval,
-    path_to_write,
-    dataset_id=None,
-    variable=None,
-    srid=32612,
-    legend_title=None,
-    legend_factor=1.0
-):
-    """Generate CZML for output files."""
-    # Read the nodes file
-    nodes, _, _, _, node_ids = get_nodes(nodes_file, srid)
-    outlet_id = node_ids.index(2)
-
-    # Get Variables and Data
-    data = {}
-    for _f in output_files:
-        with open(_f, 'r') as f:
-            _data = f.readlines()
-            header, _data = _data[0], _data[2:]
-            headers = [x.strip().replace(',', '_').replace('/', '-') for x in re.split(r'\s*\d+-', header)[1:]]
-            _data = [tuple(map(float, d.strip().split())) for d in _data]
-            df = pd.DataFrame(_data, columns=headers)
-            point_id_str = os.path.splitext(os.path.basename(_f))[0].split('_')[-1]
-            if point_id_str == 'Outlet':
-                point_id_str = outlet_id
-            point_id = int(point_id_str)
-            data[point_id] = df
-
-    # Create Generator
-    czml_gen = CZMLGenerator("Output Files")
-
-    # Iterate through points and add them to the generator
-    for point_id, df in data.items():
-        loc = nodes[point_id][:2]
-
-        label_pt_id = str(point_id)
-        if point_id == outlet_id:
-            label_pt_id = 'Outlet'
-
-        dataset_id_string = f" [{dataset_id}]" if dataset_id else ""
-        czml_gen.add_point(
-            point=loc,
-            data_values=df[variable].values,
-            id=f"point_{label_pt_id}{dataset_id_string}",
-            start_time=start_date,
-            run_time=run_time,
-            interval=interval
-        )
-
-    # Get the CZML
-    czml_gen.write_czml(path_to_write, legend=True, legend_title=legend_title, legend_factor=legend_factor)
+def polygon_entity(entity_id, positions):
+    """A polygon feature of a value layer: ``positions`` is a flat list of longitude, latitude, height."""
+    return dict(id=entity_id, kind='polygon', positions=[float(p) for p in positions])
 
 
-def generate_czml_for_mrf_and_rft_files(
-    nodes_file,
-    output_files,
-    start_date,
-    run_time,
-    interval,
-    path_to_write,
-    dataset_id=None,
-    variable=None,
-    srid=32612,
-    legend_title=None,
-    legend_factor=1.0
-):
-    """Generate CZML for MRF and RFT files."""
-    # Read the nodes file
-    _, _, _, nodes, _ = get_nodes(nodes_file, srid)
+def write_geometry_czml(path, name, entities):
+    """Write the features of a value layer as one CZML document. The features are static and gray: the browser colors
+    them from the values files (see ``write_value_layer``). There is no clock or availability in the document, so
+    loading it does not change the viewer's clock and the features show at any time."""
+    czml = [{'id': 'document', 'name': name, 'version': '1.0'}]
+    for entity in entities:
+        if entity['kind'] == 'point':
+            czml.append({
+                'id': entity['id'],
+                'position': {'cartographicDegrees': entity['positions'] + [20]},
+                'point': {
+                    'color': {'rgba': NO_VALUE_RGBA},
+                    'outlineColor': {'rgba': [0, 0, 0, 255]},
+                    'outlineWidth': 1,
+                    'pixelSize': 10,
+                    'show': True,
+                    'heightReference': 'RELATIVE_TO_GROUND',
+                },
+            })
+        else:
+            czml.append({
+                'id': entity['id'],
+                'polygon': {
+                    'positions': {'cartographicDegrees': entity['positions']},
+                    'material': {'solidColor': {'color': {'rgba': NO_VALUE_RGBA[:3] + [POLYGON_ALPHA]}}},
+                    'height': 0,
+                    'heightReference': 'RELATIVE_TO_GROUND',
+                    'show': True,
+                },
+            })
+    with open(path, 'w') as f:
+        json.dump(czml, f)
 
-    # Get Variables and Data
-    data = {}
-    for i, _f in enumerate(output_files):
-        with open(_f, 'r') as f:
-            _data = f.readlines()
-            header, _data = _data[0], _data[2:]
-            headers = [x.strip().replace(',', '_').replace('/', '-') for x in re.split(r'\t', header) if x != '']
-            _data = [tuple(map(float, d.strip().split())) for d in _data]
-            df = pd.DataFrame(_data, columns=headers)
-            data[i] = df
 
-    # Create Generator
-    czml_gen = CZMLGenerator("TRIBS Output Files")
+def _safe_file_name(name):
+    return re.sub(r'[^A-Za-z0-9_.-]', '_', name)
 
-    # Iterate through polygons and add them to the generator
-    for _, df in data.items():
-        polygon_points = nodes.flatten()
-        czml_gen.add_polygon(
-            polygon=polygon_points,
-            data_values=df[variable].values,
-            id=f"polygon [{dataset_id}]",
-            start_time=start_date,
-            run_time=run_time,
-            interval=interval
-        )
 
-    # Get the CZML
-    czml_gen.write_czml(path_to_write, legend=True, legend_title=legend_title, legend_factor=legend_factor)
+def _json_number(value):
+    """A value for a values file: six significant digits, None for a missing or non-finite value."""
+    if value is None or not math.isfinite(value):
+        return None
+    return float(f'{value:.6g}')
+
+
+def _iso(moment):
+    return moment.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def _clock_step_hours(hours):
+    """The step the clock plays a layer with: its usual time step, but no finer than ``MAX_CLOCK_STEPS`` steps over
+    the whole series. None for a single time."""
+    if len(hours) < 2:
+        return None
+    step = float(np.median(np.diff(hours)))
+    return max(step, (hours[-1] - hours[0]) / MAX_CLOCK_STEPS)
+
+
+def write_value_layer(czml_dir, frames, time_column, variables, start_date):
+    """Write the values files of a value layer: for each variable one JSON file with the value of every feature at
+    every time, which the browser colors the features from (and can recolor with any ramp).
+
+    Args:
+        czml_dir(str): The dataset's ``czml`` folder; the files go in its ``values`` folder.
+        frames(dict): ``{entity id: DataFrame}``, the time series of each feature as read from its file.
+        time_column(str): Column of the frames that holds the hours since the start of the run.
+        variables(list): ``[{'name': <column>, 'factor': <display units per file unit>, ...}]`` to write. Other keys
+            (label, units, tier, description) are passed through.
+        start_date(datetime.datetime): Start of the run (STARTDATE); anything else leaves the times out, and the
+            layer then shows its first time only.
+
+    Returns:
+        list: The ``variables`` with, added to each: ``min`` and ``max`` (display units, over all features and times;
+        None when there is no value), ``start`` and ``end`` (ISO times of the first and last row), ``step_hours``
+        (see ``_clock_step_hours``) and ``values`` (path of its file relative to ``czml_dir``).
+
+        A values file holds ``{'variable', 'start', 'hours': [...], 'ids': [...], 'values': [[...], ...]}``:
+        ``values[i][j]`` is the value of feature ``ids[i]`` at ``hours[j]``, in display units, null when the feature
+        has no row for that hour. ``hours`` are the times of the files, in hours since the start of the run. A
+        feature shows the row of the last hour at or before the clock time.
+    """
+    values_dir = os.path.join(czml_dir, VALUES_DIR)
+    os.makedirs(values_dir, exist_ok=True)
+
+    ids = list(frames.keys())
+    indexed = {}
+    for entity_id, frame in frames.items():
+        frame = frame.drop_duplicates(subset=time_column, keep='last').set_index(time_column).sort_index()
+        frame.index = frame.index.astype(float).round(6)
+        indexed[entity_id] = frame
+    hours = sorted(set().union(*(frame.index for frame in indexed.values())))
+    has_times = isinstance(start_date, datetime.datetime) and len(hours) > 0
+    start = _iso(start_date + datetime.timedelta(hours=hours[0])) if has_times else None
+    end = _iso(start_date + datetime.timedelta(hours=hours[-1])) if has_times else None
+    run_start = _iso(start_date) if has_times else None
+    step_hours = _clock_step_hours(hours) if has_times else None
+
+    written = []
+    for position, variable in enumerate(variables):
+        name, factor = variable['name'], variable.get('factor', 1.0)
+        rows, low, high = [], None, None
+        for entity_id in ids:
+            frame = indexed[entity_id]
+            if name in frame.columns:
+                series = frame[name].reindex(hours).to_numpy(dtype=float) * factor
+            else:
+                series = np.full(len(hours), np.nan)
+            finite = series[np.isfinite(series)]
+            if finite.size:
+                low = float(finite.min()) if low is None else min(low, float(finite.min()))
+                high = float(finite.max()) if high is None else max(high, float(finite.max()))
+            rows.append([_json_number(value) for value in series])
+        relative_path = os.path.join(VALUES_DIR, f'{position:03d}_{_safe_file_name(name)}.json')
+        with open(os.path.join(czml_dir, relative_path), 'w') as f:
+            json.dump(dict(variable=name, start=run_start, hours=hours, ids=ids, values=rows), f)
+        low, high = scale_range(low, high, 1.0)
+        written.append(dict(
+            variable, min=_json_number(low), max=_json_number(high), start=start, end=end, step_hours=step_hours,
+            values=relative_path,
+        ))
+    return written
 
 
 def generate_czml_for_sdf_station(
