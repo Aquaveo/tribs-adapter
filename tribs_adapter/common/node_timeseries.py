@@ -91,7 +91,9 @@ def read_basin_file(path):
     """
     with open(path, 'r') as f:
         lines = f.readlines()
-    columns = [canonical_layer_name(column) for column in lines[0].split('\t') if column.strip()] if lines else []
+    # mrf/rft names carry no units (those are on the next line), so they are only made safe as layer names
+    header = lines[0].split('\t') if lines else []
+    columns = [column.strip().replace(',', '_').replace('/', '-') for column in header if column.strip()]
     if BASIN_TIME_COLUMN not in columns:
         raise ValueError(f'Could not find the {BASIN_TIME_COLUMN} column in the header of {os.path.basename(path)}.')
     unit_tokens = [token.strip() for token in lines[1].split('\t') if token.strip()] if len(lines) > 1 else []
