@@ -73,18 +73,46 @@ KIND_BY_DATASET_TYPE = {
 UNIT_TOKEN_NAMES = {
     '[]': None,
     'mm': 'mm',
+    'cm': 'cm',
     'm': 'm',
     'm3-h': 'm³/hr',
     'm3-s': 'm³/s',
     'm2-s': 'm²/s',
+    'm2-h': 'm²/hr',
     'W-m2': 'W/m²',
+    'kJ-m2': 'kJ/m²',
+    'kJ-m2-etistep': 'kJ/m² per ET step',
     'oC': '°C',
+    'C': '°C',
     'd-l': 'd/L',
     'm-s': 'm/s',
+    's-m': 's/m',
+    '1-mm': '1/mm',
     'mm-h': 'mm/hr',
     'mm-hr': 'mm/hr',
+    'h': 'hr',
+    'hr': 'hr',
     'Pa': 'Pa',
 }
+
+# Current tRIBS writes pixel headers without column numbers and with the units joined by underscores
+# (``QpOut_mm_h``); older files have ``8-QpOut,mm/h``, which the app has always named ``QpOut_mm-h``. The longest
+# spelling is tried first so ``_mm_h`` is not read as ``_h``.
+_UNDERSCORE_UNIT_SUFFIXES = sorted(
+    ((f"_{token.replace('-', '_')}", f'_{token}') for token in UNIT_TOKEN_NAMES if '-' in token),
+    key=lambda pair: len(pair[0]), reverse=True,
+)
+
+
+def canonical_layer_name(column):
+    """The layer name of a pixel/qout header column, the same for both header styles: ``'QpOut_mm_h'`` (current
+    tRIBS) and ``'QpOut,mm/h'`` (older, after its number is stripped) both give ``'QpOut_mm-h'``."""
+    name = column.strip().replace(',', '_').replace('/', '-')
+    for underscored, canonical in _UNDERSCORE_UNIT_SUFFIXES:
+        if name.endswith(underscored) and len(name) > len(underscored):
+            return name[:-len(underscored)] + canonical
+    return name
+
 
 OUTPUT_VARIABLES = {
     QOUT: (

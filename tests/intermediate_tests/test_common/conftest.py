@@ -37,25 +37,5 @@ def simple_station_file_path(simple_file_directory):
 
 
 @pytest.fixture
-def expected_pixel_czml_file_path(simple_file_directory):
-    return simple_file_directory / 'simple_pixel_expected.czml'
-
-
-@pytest.fixture
-def expected_qout_czml_file_path(simple_file_directory):
-    return simple_file_directory / 'simple_qout_expected.czml'
-
-
-@pytest.fixture
-def expected_mrf_czml_file_path(simple_file_directory):
-    return simple_file_directory / 'simple_mrf_expected.czml'
-
-
-@pytest.fixture
-def expected_rft_czml_file_path(simple_file_directory):
-    return simple_file_directory / 'simple_rft_expected.czml'
-
-
-@pytest.fixture
 def expected_sdf_czml_file_path(simple_file_directory):
     return simple_file_directory / 'simple_sdf_expected.czml'

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from tribs_adapter.common import output_variables as ov
-from tribs_adapter.common.czml_converters import get_file_variables, get_output_file_variables
+from tribs_adapter.common.node_timeseries import BASIN_TIME_COLUMN, node_file_variables, read_basin_file
 from tribs_adapter.common.dataset_types import DatasetTypes
 
 FILES = Path(__file__).resolve().parent.parent.parent / 'files'
@@ -155,7 +155,7 @@ def test_scale_range(low, high, factor, expected):
     ('mrf', 'czml_converters/simple_files/simple.mrf'),
 ])
 def test_every_mrf_fixture_column_is_in_the_table(kind, relative_path):
-    names = get_output_file_variables(FILES / relative_path)
+    names = [c for c in read_basin_file(FILES / relative_path)[0].columns if c != BASIN_TIME_COLUMN]
     unknown = [n for n in names if ov.lookup(kind, n) is None]
     assert unknown == [], f'{relative_path}: {unknown}'
     assert ov.visible_variables(kind, names)  # something is offered
@@ -166,7 +166,7 @@ def test_every_mrf_fixture_column_is_in_the_table(kind, relative_path):
     'czml_converters/simple_files/simple_Outlet.qout',
 ])
 def test_every_qout_fixture_column_is_in_the_table(relative_path):
-    layer_names = get_file_variables(FILES / relative_path, skip_cols=1)
+    layer_names = node_file_variables(FILES / relative_path)
     bases = [ov.split_unit_suffix(n)[0] for n in layer_names]
     assert [b for b in bases if ov.lookup('qout', b) is None] == []
     assert ov.visible_variables('qout', bases) == ['Qstrm']
@@ -278,3 +278,39 @@ def test_a_derived_variable_replaces_its_source_columns():
     )
     total_et = ov.describe('dynamic', 'TotalET')
     assert (total_et['label'], total_et['units'], total_et['tier']) == ('Evapotranspiration', 'mm/hr', 'priority')
+
+
+@pytest.mark.parametrize('column, expected', [
+    # current tRIBS: no column numbers, units after underscores
+    ('Nwt_mm', 'Nwt_mm'),
+    ('QpOut_mm_h', 'QpOut_mm-h'),
+    ('Trnsm_m2_h', 'Trnsm_m2-h'),
+    ('NetRad_W_m2', 'NetRad_W-m2'),
+    ('ShrtRadIn_dir_W_m2', 'ShrtRadIn_dir_W-m2'),
+    ('DrainCoeff_mm_hr', 'DrainCoeff_mm-hr'),
+    ('DrainExpPar_1_mm', 'DrainExpPar_1-mm'),
+    ('DU_kJ_m2_etistep', 'DU_kJ-m2-etistep'),
+    ('Recharge_mm/hr', 'Recharge_mm-hr'),
+    ('Srf_Hour_mm', 'Srf_Hour_mm'),
+    ('SoilMoist_[]', 'SoilMoist_[]'),
+    ('NodeID', 'NodeID'),
+    # older tRIBS, after the column number is stripped
+    ('QpOut,mm/h', 'QpOut_mm-h'),
+    ('Time,hr', 'Time_hr'),
+    ('ShrtRadIn_dir,W/m2', 'ShrtRadIn_dir_W-m2'),
+])
+def test_canonical_layer_name_is_the_same_for_both_header_styles(column, expected):
+    assert ov.canonical_layer_name(column) == expected
+
+
+@pytest.mark.parametrize('layer_name, expected', [
+    ('QpOut_mm-h', ('QpOut', 'mm/hr')),
+    ('Trnsm_m2-h', ('Trnsm', 'm²/hr')),
+    ('SnTemp_C', ('SnTemp', '°C')),
+    ('IceWE_cm', ('IceWE', 'cm')),
+    ('DU_kJ-m2-etistep', ('DU', 'kJ/m² per ET step')),
+    ('SoilMoist_[]', ('SoilMoist', None)),
+])
+def test_unit_tokens_of_current_pixel_headers_are_described(layer_name, expected):
+    base, token = ov.split_unit_suffix(layer_name)
+    assert (base, ov.describe(None, base, unit_token=token)['units']) == expected

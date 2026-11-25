@@ -7,7 +7,6 @@ from unittest import mock
 import pytest
 
 from tribs_adapter.common.dataset_types import DatasetTypes
-from tribs_adapter.services import tribs_spatial_manager as tsm_module
 from tribs_adapter.services.tribs_spatial_manager import TribsSpatialManager
 
 
@@ -243,6 +242,8 @@ def _output_dataset(path, dataset_type=DatasetTypes.TRIBS_OUT_TIME_INTEGRATED, s
     dataset.id = 'ds-1'
     dataset.dataset_type = dataset_type
     dataset.file_collection_client.path = str(path)
+    dataset.name = 'Output Dataset'
+    dataset.file_collection_client.add_item.side_effect = lambda czml_path: shutil.copytree(czml_path, path / 'added')
     dataset.file_collection.file_database_id = 'fdb'
     dataset.file_collection.id = 'fc'
     dataset.linked_realizations = []
@@ -364,9 +365,9 @@ def test_create_layer_for_output_dataset_requires_a_linked_realization(tsm, tmp_
     session.commit.assert_not_called()
 
 
-# --- create_tribs_czml_layer: per-variable metadata ------------------------------------------------------------------
-# Real mrf/qout/pixel files from the czml_converters fixtures; the CZML generators are spies, so the tests check which
-# variables become layers, how each is described, and the legend factor each generator is given.
+# --- create_tribs_czml_layer: value layers ---------------------------------------------------------------------------
+# Real mrf/qout/pixel files from the czml_converters fixtures. The file collection keeps a copy of the czml folder it
+# is given (the manager writes it in a temporary folder), so the tests read back the features and the values.
 
 SIMPLE_FILES = os.path.join('czml_converters', 'simple_files')
 
@@ -377,6 +378,8 @@ def _czml_dataset(path, files_dir, dataset_type, data_file):
     dataset.id = 'ds-1'
     dataset.dataset_type = dataset_type
     dataset.file_collection_client.path = str(path)
+    dataset.name = 'Output Dataset'
+    dataset.file_collection_client.add_item.side_effect = lambda czml_path: shutil.copytree(czml_path, path / 'added')
     realization = mock.MagicMock()
     time_variables = realization.input_file.run_parameters.time_variables
     time_variables.STARTDATE = datetime.datetime(2004, 6, 1)
@@ -389,15 +392,13 @@ def _czml_dataset(path, files_dir, dataset_type, data_file):
     return dataset, session
 
 
-def _generated(spy):
-    """(variable, czml file name, legend_factor) of each CZML the spy was asked to write, in order."""
-    return [(c.args[7], os.path.basename(c.args[5]), c.kwargs['legend_factor']) for c in spy.call_args_list]
+def _added(path, relative_path):
+    return json.loads((path / 'added' / relative_path).read_text())
 
 
-def test_create_tribs_czml_layer_for_mrf_offers_the_sheet_variables(tsm, tmp_path, files_dir, mocker):
+def test_create_tribs_czml_layer_for_mrf_offers_the_sheet_variables(tsm, tmp_path, files_dir):
     dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_MRF, 'simple.mrf')
     (tmp_path / 'czml').mkdir()  # a previous visualization
-    generate = mocker.patch.object(tsm_module, 'generate_czml_for_mrf_and_rft_files')
 
     meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
 
@@ -410,12 +411,20 @@ def test_create_tribs_czml_layer_for_mrf_offers_the_sheet_variables(tsm, tmp_pat
         ('Depth to Groundwater', 'm', 0.001)
     assert (by_name['MSMRt']['units'], by_name['MSMRt']['factor']) == ('% saturation', 100.0)
     assert by_name['MAP']['description']
-    # One CZML per offered variable, legend ticks in display units
-    assert _generated(generate) == [
-        ('MAP', 'ds-1-MAP.czml', 1.0), ('MSMRt', 'ds-1-MSMRt.czml', 100.0), ('MDGW', 'ds-1-MDGW.czml', 0.001),
-        ('Srf', 'ds-1-Srf.czml', 1.0), ('MSM100', 'ds-1-MSM100.czml', 100.0), ('MSMU', 'ds-1-MSMU.czml', 100.0),
+    # One document with the basin polygon, and one values file per offered variable in display units
+    assert sorted(os.listdir(tmp_path / 'added')) == ['ds-1.czml', 'values']
+    document, polygon = _added(tmp_path, 'ds-1.czml')
+    assert document['name'] == 'Output Dataset' and polygon['id'] == 'polygon [ds-1]'
+    assert [v['values'] for v in meta['variables']] == [
+        'values/000_MAP.json', 'values/001_MSMRt.json', 'values/002_MDGW.json', 'values/003_Srf.json',
+        'values/004_MSM100.json', 'values/005_MSMU.json',
     ]
-    assert all(c.kwargs['srid'] == 32612 and c.args[6] == 'ds-1' for c in generate.call_args_list)
+    mdgw = _added(tmp_path, 'values/002_MDGW.json')
+    assert mdgw['ids'] == ['polygon [ds-1]'] and mdgw['hours'][:2] == [1.0, 2.0]
+    assert mdgw['values'][0][0] == pytest.approx(3.41766)  # 3417.655425 mm in the file
+    assert by_name['MDGW']['min'] <= mdgw['values'][0][0] <= by_name['MDGW']['max']
+    # The times are the hours of the rows after STARTDATE
+    assert by_name['MAP']['start'] == '2004-06-01T01:00:00Z' and by_name['MAP']['step_hours'] == 1.0
     # The old czml directory is replaced and the extent comes from the node file
     dataset.file_collection_client.delete_item.assert_called_once_with('czml')
     dataset.file_collection_client.add_item.assert_called_once()
@@ -424,9 +433,8 @@ def test_create_tribs_czml_layer_for_mrf_offers_the_sheet_variables(tsm, tmp_pat
     json.dumps(meta)
 
 
-def test_create_tribs_czml_layer_for_qout_keeps_the_unit_suffix_in_the_layer_name(tsm, tmp_path, files_dir, mocker):
+def test_create_tribs_czml_layer_for_qout_keeps_the_unit_suffix_in_the_layer_name(tsm, tmp_path, files_dir):
     dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
-    generate = mocker.patch.object(tsm_module, 'generate_czml_for_qout_files')
 
     meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
 
@@ -434,13 +442,20 @@ def test_create_tribs_czml_layer_for_qout_keeps_the_unit_suffix_in_the_layer_nam
     (qstrm,) = meta['variables']
     assert (qstrm['name'], qstrm['label'], qstrm['units'], qstrm['tier'], qstrm['factor']) == \
         ('Qstrm_m3-s', 'Streamflow', 'm³/s', 'priority', 1.0)
-    assert _generated(generate) == [('Qstrm_m3-s', 'ds-1-Qstrm_m3-s.czml', 1.0)]
+    assert qstrm['values'] == 'values/000_Qstrm_m3-s.json'
+    _, outlet = _added(tmp_path, 'ds-1.czml')
+    assert outlet['id'] == 'point_Outlet [ds-1]'
+    values = _added(tmp_path, qstrm['values'])
+    assert values['ids'] == ['point_Outlet [ds-1]']
+    # The time axis is the file's own (every 0.06 h), starting with its first row
+    assert values['hours'][:3] == [0.06, 0.12, 0.18]
+    assert qstrm['start'] == '2004-06-01T00:03:36Z'
+    assert len(values['values'][0]) == len(values['hours'])
     dataset.file_collection_client.delete_item.assert_not_called()
 
 
-def test_create_tribs_czml_layer_for_pixel_keeps_every_variable_with_its_unit_token(tsm, tmp_path, files_dir, mocker):
+def test_create_tribs_czml_layer_for_pixel_keeps_every_variable_with_its_unit_token(tsm, tmp_path, files_dir):
     dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_PIXEL, 'simple.pixel')
-    generate = mocker.patch.object(tsm_module, 'generate_czml_for_pixel_files')
 
     meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
 
@@ -449,5 +464,113 @@ def test_create_tribs_czml_layer_for_pixel_keeps_every_variable_with_its_unit_to
     assert all((v['tier'], v['factor'], v['description']) == (None, 1.0, '') for v in meta['variables'])
     nwt = meta['variables'][0]
     assert (nwt['label'], nwt['units']) == ('Nwt', 'mm')
-    assert [g[0] for g in _generated(generate)] == ['Nwt_mm', 'Nf_mm', 'Nt_mm', 'Mu_mm', 'Mi_mm']
-    assert all(g[2] == 1.0 for g in _generated(generate))
+    # The point is the node named in the file's rows (node 1), with the values of its rows
+    _, point = _added(tmp_path, 'ds-1.czml')
+    assert point['id'] == 'point_1 [ds-1]'
+    values = _added(tmp_path, nwt['values'])
+    assert values == {
+        'variable': 'Nwt_mm', 'start': '2004-06-01T00:00:00Z', 'hours': [0.0, 1.0, 2.0],
+        'ids': ['point_1 [ds-1]'], 'values': [[4033.7, 4043.7, 4053.7]],
+    }
+    assert (nwt['min'], nwt['max']) == (4033.7, 4053.7)
+
+
+def test_create_tribs_czml_layer_for_a_plain_pixel_header(tsm, tmp_path, files_dir):
+    """Current tRIBS writes the header without column numbers: the layer has the same variables."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_PIXEL, 'simple.pixel')
+    pixel_file = tmp_path / 'simple.pixel'
+    lines = pixel_file.read_text().splitlines()
+    pixel_file.write_text('\n'.join(['NodeID Time_hr Nwt_mm Nf_mm Nt_mm Mu_mm Mi_mm '] + lines[1:]) + '\n')
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    assert [v['name'] for v in meta['variables']] == ['Nwt_mm', 'Nf_mm', 'Nt_mm', 'Mu_mm', 'Mi_mm']
+    assert _added(tmp_path, meta['variables'][0]['values'])['values'] == [[4033.7, 4043.7, 4053.7]]
+
+
+def test_create_tribs_czml_layer_fails_for_a_pixel_file_it_cannot_read(tsm, tmp_path, files_dir):
+    """A header that gives no variables fails the layer instead of leaving it empty."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_PIXEL, 'simple.pixel')
+    (tmp_path / 'simple.pixel').write_text('not a header\n1 2 3\n')
+
+    with pytest.raises(ValueError, match='Could not find the NodeID column in the header of simple.pixel'):
+        tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    dataset.file_collection_client.add_item.assert_not_called()
+
+
+def test_create_tribs_czml_layer_fails_without_an_output_file(tsm, tmp_path, files_dir):
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    (tmp_path / 'simple_Outlet.qout').unlink()
+
+    with pytest.raises(ValueError, match='No .qout file found in the file collection of dataset ds-1'):
+        tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+
+def _add_qout_file(path, name):
+    shutil.copy(path / 'simple_Outlet.qout', path / name)
+
+
+def test_create_tribs_czml_layer_for_qout_names_interior_points_as_their_files_do(tsm, tmp_path, files_dir):
+    """The plot asks for a point by the name in its entity id, so that is the name of its file. The outlet is node 0
+    of the simple mesh: its interior-node file repeats _Outlet.qout and is left out."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    _add_qout_file(tmp_path, 'simple_3.qout')
+    _add_qout_file(tmp_path, 'simple_0.qout')
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    ids = [entity['id'] for entity in _added(tmp_path, 'ds-1.czml')[1:]]
+    assert ids == ['point_3 [ds-1]', 'point_Outlet [ds-1]']
+    assert _added(tmp_path, meta['variables'][0]['values'])['ids'] == ids
+
+
+def test_create_tribs_czml_layer_for_qout_keeps_the_node_name_of_an_outlet_without_an_outlet_file(
+    tsm, tmp_path, files_dir
+):
+    """Without <base>_Outlet.qout the outlet's point is its node, the name the plot can find its file by."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    (tmp_path / 'simple_Outlet.qout').rename(tmp_path / 'simple_0.qout')
+
+    tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    assert [entity['id'] for entity in _added(tmp_path, 'ds-1.czml')[1:]] == ['point_0 [ds-1]']
+
+
+def test_create_tribs_czml_layer_for_qout_fails_for_a_node_the_mesh_does_not_have(tsm, tmp_path, files_dir):
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    _add_qout_file(tmp_path, 'simple_99.qout')
+
+    with pytest.raises(ValueError, match='simple_99.qout is for node 99, which the mesh does not have'):
+        tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+
+def test_create_tribs_czml_layer_fails_when_no_variable_is_offered(tsm, tmp_path, files_dir):
+    """A qout file with only hidden columns would leave a layer of gray points: fail it instead."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    (tmp_path / 'simple_Outlet.qout').write_text('1-Time,hr\t2-Hlev,m\n0.06\t0.1\n')
+
+    with pytest.raises(ValueError, match='The files of dataset ds-1 hold no variable to show'):
+        tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+
+def test_create_layer_for_qout_dataset_sets_a_value_layer_viz(tsm, tmp_path, files_dir):
+    """The viz names the one feature document and, per variable, the url of its values file; there are no legend
+    images because the browser draws the legend."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    dataset.file_collection_client.add_item.side_effect = lambda source: shutil.copytree(source, tmp_path / 'czml')
+    dataset.file_collection.file_database_id = 'fdb'
+    dataset.file_collection.id = 'fc'
+
+    tsm.create_layer_for_dataset(dataset, 32612, session)
+
+    viz = _viz_set_on(dataset)
+    assert viz['type'] == 'czml'
+    assert viz['url'] == ['fdb/fc/czml/ds-1.czml']
+    assert viz['legend'] == []
+    assert viz['origin'] is not None and len(viz['extent']) == 4
+    (qstrm,) = viz['variables']
+    assert qstrm['values'] == 'fdb/fc/czml/values/000_Qstrm_m3-s.json'
+    assert (qstrm['name'], qstrm['label']) == ('Qstrm_m3-s', 'Streamflow')
+    assert isinstance(qstrm['min'], float) and isinstance(qstrm['max'], float)
+    json.dumps(viz)

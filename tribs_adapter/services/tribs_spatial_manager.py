@@ -29,9 +29,10 @@ from tethysext.atcore.services.resource_spatial_manager import ResourceSpatialMa
 
 from tribs_adapter.common.dataset_types import DatasetTypes, CompoundDatasetTypes, \
     GltfOutputDatasetTypes, SdfDatasetTypes, WMSDatasetTypes, NoEnvStrDatasetTypes
-from tribs_adapter.common.czml_converters import generate_czml_for_pixel_files, generate_czml_for_mrf_and_rft_files, \
-    generate_czml_for_qout_files, get_file_variables, get_output_file_units, get_output_file_variables, get_extents, \
-    get_nodes, generate_czml_for_sdf_station, reproject
+from tribs_adapter.common.czml_converters import get_extents, get_nodes, generate_czml_for_sdf_station, \
+    point_entity, polygon_entity, reproject, write_geometry_czml, write_value_layer
+from tribs_adapter.common.node_timeseries import BASIN_TIME_COLUMN, NODE_ID_COLUMN, NODE_TIME_COLUMN, OUTLET, \
+    pixel_files_by_node, qout_files_by_point, read_basin_file, read_node_file
 from tribs_adapter.common.output_variables import (
     derived_terms, derived_variables, describe as describe_variable, kind_for_dataset_type, scale_range,
     split_unit_suffix, visible_variables
@@ -368,7 +369,14 @@ class TribsSpatialManager(ResourceSpatialManager):
                 'legend': legend_urls,
             }
             if meta.get('variables'):
-                viz['variables'] = meta['variables']
+                # A value layer's variables name their values file relative to the czml folder
+                czml_url_dir = os.path.join(
+                    str(dataset.file_collection.file_database_id), str(dataset.file_collection.id), 'czml'
+                )
+                viz['variables'] = [
+                    dict(variable, values=os.path.join(czml_url_dir, variable['values']))
+                    if variable.get('values') else variable for variable in meta['variables']
+                ]
 
         elif dataset.dataset_type in CompoundDatasetTypes:
             layers, extent, env_strs = self.create_all_compound_layers(dataset, srid)
@@ -1031,6 +1039,91 @@ class TribsSpatialManager(ResourceSpatialManager):
         log.info(f'No Voronoi polygon (_voi) file found for mesh {mesh_file}.')
         return None
 
+    # Output shown as features the browser colors by value: node dynamic output and the outlet/interior hydrographs
+    # as points, basin averaged output as the basin polygon.
+    VALUE_LAYER_DATASET_TYPES = (
+        DatasetTypes.TRIBS_OUT_PIXEL, DatasetTypes.TRIBS_OUT_QOUT, DatasetTypes.TRIBS_OUT_MRF,
+        DatasetTypes.TRIBS_OUT_RFT,
+    )
+
+    @staticmethod
+    def _dataset_files(dataset, files, extension):
+        paths = sorted(os.path.join(dataset.file_collection_client.path, f) for f in files if f.endswith(extension))
+        if not paths:
+            raise ValueError(f'No {extension} file found in the file collection of dataset {dataset.id}.')
+        return paths
+
+    def _write_value_layer(self, dataset, files, node_file, srid, czml_path, start_date, variable_kind):
+        """Write the layer of a node, outlet or basin output dataset into ``czml_path``: one CZML document with its
+        features (``<dataset id>.czml``) and one values file per variable (see ``write_value_layer``).
+
+        Returns:
+            list: How each variable is presented and where its values are: ``[{'name': <layer name>, 'label',
+            'units', 'tier', 'description', 'factor', 'min', 'max', 'start', 'end', 'step_hours', 'values'}]``.
+            Labels, units and tiers come from the variable table for the file kinds the sheet covers (mrf, qout)
+            and from the file headers otherwise (pixel, rft). Hidden and ignored variables are left out.
+        """
+        dataset_id = str(dataset.id)
+        entities, frames = [], {}
+        if dataset.dataset_type == DatasetTypes.TRIBS_OUT_PIXEL:
+            nodes, _, _, _, _ = get_nodes(node_file, srid)
+            for node_id, path in sorted(pixel_files_by_node(self._dataset_files(dataset, files, '.pixel')).items()):
+                if not 0 <= node_id < len(nodes):
+                    raise ValueError(f'{os.path.basename(path)} is for node {node_id}, which the mesh does not have.')
+                entity_id = f'point_{node_id} [{dataset_id}]'
+                entities.append(point_entity(entity_id, nodes[node_id][:2]))
+                frames[entity_id] = read_node_file(path)
+            time_column = NODE_TIME_COLUMN
+            columns = [c for c in next(iter(frames.values())).columns if c not in (NODE_ID_COLUMN, time_column)]
+            variables = []
+            for column in columns:
+                base, unit_token = split_unit_suffix(column)
+                variables.append(dict(name=column, **describe_variable(variable_kind, base, unit_token=unit_token)))
+        elif dataset.dataset_type == DatasetTypes.TRIBS_OUT_QOUT:
+            nodes, _, _, _, boundary_codes = get_nodes(node_file, srid)
+            if 2 not in boundary_codes:
+                raise ValueError(f'The mesh of dataset {dataset.id} has no outlet node (boundary code 2).')
+            outlet_node = boundary_codes.index(2)
+            files_by_point = qout_files_by_point(self._dataset_files(dataset, files, '.qout'))
+            for point, path in sorted(files_by_point.items()):
+                node_id = outlet_node if point == OUTLET else int(point)
+                if not 0 <= node_id < len(nodes):
+                    raise ValueError(f'{os.path.basename(path)} is for node {node_id}, which the mesh does not have.')
+                if node_id == outlet_node and point != OUTLET and OUTLET in files_by_point:
+                    continue  # the outlet's interior-node file repeats <base>_Outlet.qout
+                # The point is named as its file is, which is also how the plot asks for it
+                entity_id = f'point_{point} [{dataset_id}]'
+                entities.append(point_entity(entity_id, nodes[node_id][:2]))
+                frames[entity_id] = read_node_file(path)
+            time_column = NODE_TIME_COLUMN
+            columns = [c for c in next(iter(frames.values())).columns if c != time_column]
+            layer_by_base = {split_unit_suffix(column)[0]: column for column in columns}
+            variables = []
+            for base in visible_variables(variable_kind, layer_by_base.keys()):
+                column = layer_by_base[base]
+                info = describe_variable(variable_kind, base, unit_token=split_unit_suffix(column)[1])
+                variables.append(dict(name=column, **info))
+        else:
+            extension = '.mrf' if dataset.dataset_type == DatasetTypes.TRIBS_OUT_MRF else '.rft'
+            _, _, _, boundary_nodes, _ = get_nodes(node_file, srid)
+            entity_id = f'polygon [{dataset_id}]'
+            entities.append(polygon_entity(entity_id, boundary_nodes.flatten()))
+            frame, file_units = read_basin_file(self._dataset_files(dataset, files, extension)[0])
+            frames[entity_id] = frame
+            time_column = BASIN_TIME_COLUMN
+            columns = [c for c in frame.columns if c != time_column]
+            variables = [
+                dict(name=column, **describe_variable(variable_kind, column, file_units=file_units.get(column)))
+                for column in visible_variables(variable_kind, columns)
+            ]
+
+        if not variables:
+            raise ValueError(f'The files of dataset {dataset.id} hold no variable to show.')
+        write_geometry_czml(os.path.join(czml_path, f'{dataset_id}.czml'), dataset.name, entities)
+        if not isinstance(start_date, datetime.datetime):
+            log.warning(f'Could not parse STARTDATE ({start_date!r}) for dataset {dataset.id}: no time axis.')
+        return write_value_layer(czml_path, frames, time_column, variables, start_date)
+
     def create_tribs_czml_layer(self, dataset, session, files, srid):
         """
         Create a Pixel czml file for a dataset.
@@ -1045,22 +1138,15 @@ class TribsSpatialManager(ResourceSpatialManager):
 
         extent = None
         origin = None
-        # How each CZML layer is presented: ``[{'name': <layer name>, 'label', 'units', 'tier', 'description',
-        # 'factor'}]`` from the variable table (``output_variables``) for file kinds the sheet covers (mrf, qout) and
-        # from the file headers otherwise (pixel, rft). Hidden and ignored variables of covered kinds get no layer.
+        # How each layer of node, outlet and basin output is presented and where its values are: see
+        # ``_write_value_layer``. Station (SDF) data has none: its layers are per-station CZML files.
         variable_kind = kind_for_dataset_type(dataset.dataset_type)
         variables_meta = []
-
-        def legend_args(info):
-            # No title on the PNG: the app writes the dataset, variable and units around the legend itself.
-            return dict(legend_factor=info['factor'])
 
         # Get Point File Dataset
         if dataset.dataset_type not in SdfDatasetTypes:
             link = dataset.linked_realizations[0]
             start_date = link.input_file.run_parameters.time_variables.STARTDATE
-            run_time = link.input_file.run_parameters.time_variables.RUNTIME
-            output_interval = link.input_file.run_parameters.time_variables.OPINTRVL
             output_node_file = link.input_file.files_and_pathnames.mesh_generation.INPUTDATAFILE
             node_file_dataset = session.query(Dataset).get(str(output_node_file.resource_id))
 
@@ -1074,76 +1160,10 @@ class TribsSpatialManager(ResourceSpatialManager):
             czml_path = os.path.join(tempdir, 'czml')
             os.makedirs(czml_path, exist_ok=True)
 
-            if dataset.dataset_type == DatasetTypes.TRIBS_OUT_PIXEL:
-                pixels_files = [
-                    os.path.join(dataset.file_collection_client.path, f) for f in files if f.endswith('.pixel')
-                ]
-                pixel_file_variables = get_file_variables(
-                    pixels_files[0]
-                )  # All pixel files should have the same variables
-                for variable in pixel_file_variables:
-                    base, unit_token = split_unit_suffix(variable)
-                    info = describe_variable(variable_kind, base, unit_token=unit_token)
-                    variables_meta.append(dict(name=variable, **info))
-                    czml_file_path = os.path.join(czml_path, f'{str(dataset.id)}-{variable}.czml')
-                    generate_czml_for_pixel_files(
-                        node_file,
-                        pixels_files,
-                        start_date,
-                        run_time,
-                        output_interval,
-                        czml_file_path,
-                        str(dataset.id),
-                        variable,
-                        srid=srid,
-                        **legend_args(info),
-                    )
-            elif dataset.dataset_type == DatasetTypes.TRIBS_OUT_QOUT:
-                qout_files = [
-                    os.path.join(dataset.file_collection_client.path, f) for f in files if f.endswith('.qout')
-                ]
-                qout_variables = get_file_variables(qout_files[0], skip_cols=1)  # e.g. ['Qstrm_m3-s', 'Hlev_m']
-                layer_by_base = {split_unit_suffix(v)[0]: v for v in qout_variables}
-                for base in visible_variables(variable_kind, layer_by_base.keys()):
-                    variable = layer_by_base[base]
-                    info = describe_variable(variable_kind, base, unit_token=split_unit_suffix(variable)[1])
-                    variables_meta.append(dict(name=variable, **info))
-                    czml_file_path = os.path.join(czml_path, f'{str(dataset.id)}-{variable}.czml')
-                    generate_czml_for_qout_files(
-                        node_file,
-                        qout_files,
-                        start_date,
-                        run_time,
-                        output_interval,
-                        czml_file_path,
-                        str(dataset.id),
-                        variable,
-                        srid=srid,
-                        **legend_args(info),
-                    )
-            elif dataset.dataset_type in [DatasetTypes.TRIBS_OUT_MRF, DatasetTypes.TRIBS_OUT_RFT]:
-                extension = '.mrf' if dataset.dataset_type == DatasetTypes.TRIBS_OUT_MRF else '.rft'
-                out_files = [
-                    os.path.join(dataset.file_collection_client.path, f) for f in files if f.endswith(extension)
-                ]
-                out_variables = get_output_file_variables(out_files[0])
-                file_units = get_output_file_units(out_files[0])
-                for variable in visible_variables(variable_kind, out_variables):
-                    info = describe_variable(variable_kind, variable, file_units=file_units.get(variable))
-                    variables_meta.append(dict(name=variable, **info))
-                    czml_file_path = os.path.join(czml_path, f'{str(dataset.id)}-{variable}.czml')
-                    generate_czml_for_mrf_and_rft_files(
-                        node_file,
-                        out_files,
-                        start_date,
-                        run_time,
-                        output_interval,
-                        czml_file_path,
-                        str(dataset.id),
-                        variable,
-                        srid=srid,
-                        **legend_args(info),
-                    )
+            if dataset.dataset_type in self.VALUE_LAYER_DATASET_TYPES:
+                variables_meta = self._write_value_layer(
+                    dataset, files, node_file, srid, czml_path, start_date, variable_kind
+                )
             elif dataset.dataset_type in SdfDatasetTypes:
                 # Get the sdf file
                 sdf_files = [os.path.join(dataset.file_collection_client.path, f) for f in files if f.endswith('.sdf')]
@@ -1179,7 +1199,6 @@ class TribsSpatialManager(ResourceSpatialManager):
                 nodes = []
                 for station in stations:
                     station_file = os.path.join(dataset.file_collection_client.path, station[1])
-                    czml_file_path = os.path.join(czml_path, f'{str(dataset.id)}-{station[0]}.czml')
                     df = None
                     with open(station_file, 'r') as f:
                         # Read the file into a df using the first line has headers
