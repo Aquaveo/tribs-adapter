@@ -188,3 +188,53 @@ def test_pixel_files_by_node_uses_the_first_file_by_name_for_a_node_named_twice(
 
     assert nts.pixel_files_by_node([second, first]) == {1656: first}
     assert 'smallbasin1656.pixel is for the same node as examplebasin1656.pixel' in caplog.text
+
+
+# --- read_basin_series: the rows of the run -------------------------------------------------------------------------
+
+def _basin_text(rows):
+    return 'Time\tSrf\tMSM\t\nhr\tm3/s\t[]\t\n' + ''.join(f'{t}\t{srf}\t{msm}\n' for t, srf, msm in rows)
+
+
+def test_basin_run_hours_reads_the_run_length_from_the_file_name():
+    assert nts.basin_run_hours('/files/hyd/salas0240_00.mrf') == 240
+    assert nts.basin_run_hours('cedar_flats0012_30.rft') == 12.5
+    assert nts.basin_run_hours('basin.mrf') is None
+
+
+def test_read_basin_series_leaves_out_the_rows_written_after_the_run(tmp_path):
+    # as tRIBS ends a 3 hour run: a fading value and a filler value in the extra rows, not only zeros
+    text = _basin_text([(1.0, 0.2, 0.4), (2.0, 0.1, 0.4), (3.0, 0.05, 0.4), (4.0, 0.01, 9999.99), (5.0, 0.0, 9999.99)])
+
+    frame, units = nts.read_basin_series(_write(tmp_path / 'salas0003_00.mrf', text))
+
+    assert frame['Time'].tolist() == [1.0, 2.0, 3.0]
+    assert frame['MSM'].max() == 0.4
+    assert units == {'Time': 'hr', 'Srf': 'm3/s', 'MSM': None}
+
+
+def test_read_basin_series_drops_the_all_zero_tail_of_an_mrf_file_whatever_its_name(tmp_path):
+    text = _basin_text([(1.0, 0.0, 0.4), (2.0, 0.0, 0.0), (3.0, 2.5, 0.0), (4.0, 0.0, 0.0), (5.0, 0.0, 0.0)])
+
+    frame, _ = nts.read_basin_series(_write(tmp_path / 'basin.mrf', text))
+
+    # the zero row at hour 2 is inside the run and stays
+    assert frame['Time'].tolist() == [1.0, 2.0, 3.0]
+
+
+def test_read_basin_series_keeps_the_zero_rows_of_an_rft_file_and_a_file_of_only_zeros(tmp_path):
+    zeros_at_the_end = _basin_text([(1.0, 0.3, 0.0), (2.0, 0.0, 0.0)])
+    only_zeros = _basin_text([(1.0, 0.0, 0.0), (2.0, 0.0, 0.0)])
+
+    rft, _ = nts.read_basin_series(_write(tmp_path / 'salas0002_00.rft', zeros_at_the_end))
+    mrf, _ = nts.read_basin_series(_write(tmp_path / 'salas0002_00.mrf', only_zeros))
+
+    assert rft['Time'].tolist() == [1.0, 2.0]  # runoff types can all be zero in a dry spell
+    assert mrf['Time'].tolist() == [1.0, 2.0]
+
+
+def test_read_basin_series_names_a_file_with_no_rows_within_its_run(tmp_path):
+    text = _basin_text([(5.0, 0.2, 0.4)])
+
+    with pytest.raises(ValueError, match='salas0003_00.mrf has no rows within its run of 3.0 hours'):
+        nts.read_basin_series(_write(tmp_path / 'salas0003_00.mrf', text))

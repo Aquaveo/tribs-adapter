@@ -32,7 +32,7 @@ from tribs_adapter.common.dataset_types import DatasetTypes, CompoundDatasetType
 from tribs_adapter.common.czml_converters import get_extents, get_nodes, generate_czml_for_sdf_station, \
     point_entity, polygon_entity, reproject, write_geometry_czml, write_value_layer
 from tribs_adapter.common.node_timeseries import BASIN_TIME_COLUMN, NODE_ID_COLUMN, NODE_TIME_COLUMN, OUTLET, \
-    pixel_files_by_node, qout_files_by_point, read_basin_file, read_node_file
+    pixel_files_by_node, qout_files_by_point, read_basin_series, read_node_file
 from tribs_adapter.common.output_variables import (
     derived_terms, derived_variables, describe as describe_variable, kind_for_dataset_type, scale_range,
     split_unit_suffix, visible_variables
@@ -1114,7 +1114,8 @@ class TribsSpatialManager(ResourceSpatialManager):
             _, _, _, boundary_nodes, _ = get_nodes(node_file, srid)
             entity_id = f'polygon [{dataset_id}]'
             entities.append(polygon_entity(entity_id, boundary_nodes.flatten()))
-            frame, file_units = read_basin_file(self._dataset_files(dataset, files, extension)[0])
+            # without the rows tRIBS writes after the end of the run, which would end the animation on zeros
+            frame, file_units = read_basin_series(self._dataset_files(dataset, files, extension)[0])
             frames[entity_id] = frame
             time_column = BASIN_TIME_COLUMN
             columns = [c for c in frame.columns if c != time_column]

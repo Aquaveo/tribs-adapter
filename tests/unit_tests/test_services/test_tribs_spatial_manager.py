@@ -433,6 +433,17 @@ def test_create_tribs_czml_layer_for_mrf_offers_the_sheet_variables(tsm, tmp_pat
     json.dumps(meta)
 
 
+def test_create_tribs_czml_layer_for_basin_output_ends_at_the_run_length_in_the_file_name(tsm, tmp_path, files_dir):
+    """The values of the map layer stop where the plot does: at the last hour of the run (see read_basin_series)."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_MRF, 'simple.mrf')
+    os.rename(tmp_path / 'simple.mrf', tmp_path / 'simple0002_00.mrf')  # the file of a 2 hour run, with more rows
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    assert _added(tmp_path, 'values/000_MAP.json')['hours'] == [1.0, 2.0]
+    assert {v['end'] for v in meta['variables']} == {'2004-06-01T02:00:00Z'}
+
+
 def _basin_dataset_with_mesh(tmp_path, files_dir):
     """An mrf dataset whose realization's mesh files (nodes, tri, z, edges) are all there: the salas mesh."""
     dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_MRF, 'simple.mrf')
