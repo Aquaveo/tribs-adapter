@@ -32,7 +32,7 @@ from tribs_adapter.common.dataset_types import DatasetTypes, CompoundDatasetType
 from tribs_adapter.common.czml_converters import get_extents, get_nodes, generate_czml_for_sdf_station, \
     point_entity, polygon_entity, reproject, write_geometry_czml, write_value_layer
 from tribs_adapter.common.node_timeseries import BASIN_TIME_COLUMN, NODE_ID_COLUMN, NODE_TIME_COLUMN, OUTLET, \
-    pixel_files_by_node, qout_files_by_point, read_basin_file, read_node_file
+    pixel_files_by_node, qout_files_by_point, read_basin_series, read_node_file
 from tribs_adapter.common.output_variables import (
     derived_terms, derived_variables, describe as describe_variable, kind_for_dataset_type, scale_range,
     split_unit_suffix, visible_variables
@@ -377,6 +377,12 @@ class TribsSpatialManager(ResourceSpatialManager):
                     dict(variable, values=os.path.join(czml_url_dir, variable['values']))
                     if variable.get('values') else variable for variable in meta['variables']
                 ]
+                if meta.get('surface'):
+                    # Basin output: the mesh surface the app draws in the basin's color
+                    viz['surface'] = {
+                        'url': os.path.join(czml_url_dir, meta['surface']['file']),
+                        'origin': meta['surface']['origin'],
+                    }
 
         elif dataset.dataset_type in CompoundDatasetTypes:
             layers, extent, env_strs = self.create_all_compound_layers(dataset, srid)
@@ -1108,7 +1114,8 @@ class TribsSpatialManager(ResourceSpatialManager):
             _, _, _, boundary_nodes, _ = get_nodes(node_file, srid)
             entity_id = f'polygon [{dataset_id}]'
             entities.append(polygon_entity(entity_id, boundary_nodes.flatten()))
-            frame, file_units = read_basin_file(self._dataset_files(dataset, files, extension)[0])
+            # without the rows tRIBS writes after the end of the run, which would end the animation on zeros
+            frame, file_units = read_basin_series(self._dataset_files(dataset, files, extension)[0])
             frames[entity_id] = frame
             time_column = BASIN_TIME_COLUMN
             columns = [c for c in frame.columns if c != time_column]
@@ -1123,6 +1130,34 @@ class TribsSpatialManager(ResourceSpatialManager):
         if not isinstance(start_date, datetime.datetime):
             log.warning(f'Could not parse STARTDATE ({start_date!r}) for dataset {dataset.id}: no time axis.')
         return write_value_layer(czml_path, frames, time_column, variables, start_date)
+
+    # Basin output is drawn on the mesh surface (see ``_write_basin_surface``)
+    SURFACE_DATASET_TYPES = (DatasetTypes.TRIBS_OUT_MRF,)
+    SURFACE_FILE_BASENAME = 'surface'
+
+    def _write_basin_surface(self, node_file, srid, czml_path):
+        """Write the surface of the mesh as a glTF file into ``czml_path``, for basin output to be drawn on: the
+        basin has one value, shown as one color over the terrain of the mesh instead of a flat outline.
+
+        The mesh files (``.tri``, ``.z``, ``.edges``) are read from next to ``node_file``.
+
+        Returns:
+            dict: ``{'file': <name of the glTF file in czml_path>, 'origin': [lon, lat, z]}``, or None when the surface
+            could not be written (the mesh files are not there or cannot be read); the layer then keeps its flat
+            outline.
+        """
+        mesh_basename, _ = os.path.splitext(node_file)
+        try:
+            mesh = tRIBSMeshViz(mesh_basename, mesh_epsg=srid, voi_file=self._find_voi_file(mesh_basename))
+            gltf_meta = mesh.to_gltf(os.path.join(czml_path, self.SURFACE_FILE_BASENAME))
+        except Exception as e:
+            # Best effort: the layer is complete without the surface, and a mesh the writer cannot read (files
+            # missing, cut short or inconsistent) must not cost the basin its layer
+            log.warning(
+                f'Could not write the mesh surface for basin output from {mesh_basename}: {e}', exc_info=True
+            )
+            return None
+        return {'file': os.path.basename(gltf_meta['files'][0]['gltf']), 'origin': gltf_meta['origin']}
 
     def create_tribs_czml_layer(self, dataset, session, files, srid):
         """
@@ -1142,6 +1177,7 @@ class TribsSpatialManager(ResourceSpatialManager):
         # ``_write_value_layer``. Station (SDF) data has none: its layers are per-station CZML files.
         variable_kind = kind_for_dataset_type(dataset.dataset_type)
         variables_meta = []
+        surface = None
 
         # Get Point File Dataset
         if dataset.dataset_type not in SdfDatasetTypes:
@@ -1164,6 +1200,8 @@ class TribsSpatialManager(ResourceSpatialManager):
                 variables_meta = self._write_value_layer(
                     dataset, files, node_file, srid, czml_path, start_date, variable_kind
                 )
+                if dataset.dataset_type in self.SURFACE_DATASET_TYPES:
+                    surface = self._write_basin_surface(node_file, srid, czml_path)
             elif dataset.dataset_type in SdfDatasetTypes:
                 # Get the sdf file
                 sdf_files = [os.path.join(dataset.file_collection_client.path, f) for f in files if f.endswith('.sdf')]
@@ -1264,6 +1302,8 @@ class TribsSpatialManager(ResourceSpatialManager):
             'extents': extent,
             'variables': variables_meta,
         }
+        if surface is not None:
+            meta['surface'] = surface
 
         return meta
 

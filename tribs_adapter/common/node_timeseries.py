@@ -111,6 +111,52 @@ def read_basin_file(path):
     return _read_rows(path, enumerate(lines[2:], start=3), columns), units
 
 
+# The run length in the name of a basin file: salas0240_00.mrf is the file of a 240 hour run
+_BASIN_FILE_RUN_LENGTH = re.compile(r'(?P<hours>\d{4})_(?P<minutes>\d{2})\.(mrf|rft)$')
+
+
+def basin_run_hours(path):
+    """The length of the run in hours, from the name of its ``.mrf`` or ``.rft`` file; None when the name does not
+    say."""
+    match = _BASIN_FILE_RUN_LENGTH.search(os.path.basename(str(path)))
+    if match is None:
+        return None
+    return int(match.group('hours')) + int(match.group('minutes')) / 60
+
+
+def _without_zero_tail(frame):
+    """The rows without the last ones in which every variable is zero. Rows of zeros before the last row with a
+    value are kept, and so is a file with nothing but zeros."""
+    has_value = (frame.drop(columns=[BASIN_TIME_COLUMN]) != 0).any(axis=1).to_numpy()
+    if not has_value.any():
+        return frame
+    return frame.iloc[:len(has_value) - has_value[::-1].argmax()]
+
+
+def read_basin_series(path):
+    """Read a ``.mrf`` or ``.rft`` file as the series to show (on the map and in a plot): ``read_basin_file`` without
+    the rows tRIBS writes after the end of the run.
+
+    tRIBS ends these files with a few rows past the run's last hour (``salas0240_00.mrf`` has rows for hours 241 to
+    244) in which most variables are zero, some hold a filler value (9999.99) and the rest fade out, so every variable
+    drops at the end. The rows after the run length in the file's name are left out; of an ``.mrf`` file, whose
+    variables are never all zero during a run, so are the last rows in which every variable is zero (which also
+    covers a file whose name does not give the run length).
+
+    Returns:
+        ``(frame, units)`` as ``read_basin_file``.
+    """
+    frame, units = read_basin_file(path)
+    run_hours = basin_run_hours(path)
+    if run_hours is not None:
+        frame = frame[frame[BASIN_TIME_COLUMN] <= run_hours]
+    if str(path).endswith('.mrf'):
+        frame = _without_zero_tail(frame)
+    if frame.empty:
+        raise ValueError(f'{os.path.basename(path)} has no rows within its run of {run_hours} hours.')
+    return frame.reset_index(drop=True), units
+
+
 def pixel_file_node(path):
     """The node ID a ``.pixel`` file is for: the one in its first data row. Only the top of the file is read."""
     name = os.path.basename(path)

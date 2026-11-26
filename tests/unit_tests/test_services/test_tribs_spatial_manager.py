@@ -433,6 +433,111 @@ def test_create_tribs_czml_layer_for_mrf_offers_the_sheet_variables(tsm, tmp_pat
     json.dumps(meta)
 
 
+def test_create_tribs_czml_layer_for_basin_output_ends_at_the_run_length_in_the_file_name(tsm, tmp_path, files_dir):
+    """The values of the map layer stop where the plot does: at the last hour of the run (see read_basin_series)."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_MRF, 'simple.mrf')
+    os.rename(tmp_path / 'simple.mrf', tmp_path / 'simple0002_00.mrf')  # the file of a 2 hour run, with more rows
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    assert _added(tmp_path, 'values/000_MAP.json')['hours'] == [1.0, 2.0]
+    assert {v['end'] for v in meta['variables']} == {'2004-06-01T02:00:00Z'}
+
+
+def _basin_dataset_with_mesh(tmp_path, files_dir):
+    """An mrf dataset whose realization's mesh files (nodes, tri, z, edges) are all there: the salas mesh."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_MRF, 'simple.mrf')
+    node_file_dataset = session.query.return_value.get.return_value
+    node_file_dataset.file_collection_client.path = str(files_dir / 'gltf' / 'salas')
+    return dataset, session
+
+
+def test_create_tribs_czml_layer_for_basin_output_writes_the_mesh_surface(tsm, tmp_path, files_dir):
+    dataset, session = _basin_dataset_with_mesh(tmp_path, files_dir)
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 26913)
+
+    # The surface is one glTF file next to the features and the values, placed by its own origin
+    assert sorted(os.listdir(tmp_path / 'added')) == ['ds-1.czml', 'surface.glb', 'values']
+    assert (tmp_path / 'added' / 'surface.glb').stat().st_size > 0
+    assert meta['surface']['file'] == 'surface.glb'
+    longitude, latitude, elevation = meta['surface']['origin']
+    assert (round(longitude, 2), round(latitude, 2)) == (-106.58, 34.31) and elevation > 1000
+    # The basin polygon is still in the document: it is the feature that is selected and plotted
+    assert _added(tmp_path, 'ds-1.czml')[1]['id'] == 'polygon [ds-1]'
+    json.dumps(meta)
+
+
+def test_create_tribs_czml_layer_for_basin_output_keeps_the_outline_without_the_mesh_files(
+    tsm, tmp_path, files_dir, caplog
+):
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_MRF, 'simple.mrf')  # only simple.nodes
+
+    with caplog.at_level('WARNING'):
+        meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 32612)
+
+    assert 'surface' not in meta
+    assert sorted(os.listdir(tmp_path / 'added')) == ['ds-1.czml', 'values']
+    assert 'Could not write the mesh surface for basin output' in caplog.text
+
+
+def test_create_tribs_czml_layer_for_basin_output_keeps_the_outline_for_a_mesh_it_cannot_read(
+    tsm, tmp_path, files_dir, caplog
+):
+    """A mesh file that is cut short raises something other than a missing-file error in the mesh reader."""
+    mesh_dir = tmp_path / 'mesh'
+    shutil.copytree(files_dir / 'gltf' / 'salas', mesh_dir)
+    tri = (mesh_dir / 'salas.tri').read_text().splitlines()
+    (mesh_dir / 'salas.tri').write_text('\n'.join(tri[:len(tri) // 2]) + '\n')
+    layer_dir = tmp_path / 'layer'
+    layer_dir.mkdir()
+    dataset, session = _czml_dataset(layer_dir, files_dir, DatasetTypes.TRIBS_OUT_MRF, 'simple.mrf')
+    session.query.return_value.get.return_value.file_collection_client.path = str(mesh_dir)
+
+    with caplog.at_level('WARNING'):
+        meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(layer_dir), 26913)
+
+    assert 'surface' not in meta
+    assert sorted(os.listdir(layer_dir / 'added')) == ['ds-1.czml', 'values']
+    assert 'Could not write the mesh surface for basin output' in caplog.text
+
+
+def test_create_tribs_czml_layer_for_runoff_types_output_writes_no_surface(tsm, tmp_path, files_dir):
+    """The app does not show rft output, so its surface would be a second copy nothing draws."""
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_RFT, 'simple.rft')
+    session.query.return_value.get.return_value.file_collection_client.path = str(files_dir / 'gltf' / 'salas')
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 26913)
+
+    assert 'surface' not in meta
+
+
+def test_create_tribs_czml_layer_for_node_output_writes_no_surface(tsm, tmp_path, files_dir):
+    dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
+    session.query.return_value.get.return_value.file_collection_client.path = str(files_dir / 'gltf' / 'salas')
+
+    meta = tsm.create_tribs_czml_layer(dataset, session, os.listdir(tmp_path), 26913)
+
+    assert 'surface' not in meta
+    assert sorted(os.listdir(tmp_path / 'added')) == ['ds-1.czml', 'values']
+
+
+def test_create_layer_for_basin_dataset_names_the_surface_in_the_viz(tsm, tmp_path, files_dir):
+    dataset, session = _basin_dataset_with_mesh(tmp_path, files_dir)
+    dataset.file_collection_client.add_item.side_effect = lambda source: shutil.copytree(source, tmp_path / 'czml')
+    dataset.file_collection.file_database_id = 'fdb'
+    dataset.file_collection.id = 'fc'
+
+    tsm.create_layer_for_dataset(dataset, 26913, session)
+
+    viz = _viz_set_on(dataset)
+    assert viz['url'] == ['fdb/fc/czml/ds-1.czml']  # the surface is not a feature document
+    assert viz['legend'] == []
+    assert viz['surface']['url'] == 'fdb/fc/czml/surface.glb'
+    assert len(viz['surface']['origin']) == 3
+    json.dumps(viz)
+
+
 def test_create_tribs_czml_layer_for_qout_keeps_the_unit_suffix_in_the_layer_name(tsm, tmp_path, files_dir):
     dataset, session = _czml_dataset(tmp_path, files_dir, DatasetTypes.TRIBS_OUT_QOUT, 'simple_Outlet.qout')
 
